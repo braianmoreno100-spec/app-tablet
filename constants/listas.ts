@@ -1,0 +1,214 @@
+export type TipoMaquina = 'inyeccion' | 'soplado' | 'linea';
+
+export interface Parada {
+  cod: number;
+  descripcion: string;
+  programada: boolean;
+}
+
+export interface Desperdicio {
+  cod: number;
+  defecto: string;
+}
+
+export const PARADAS_INYECCION: Parada[] = [
+  { cod: 1,  descripcion: 'AVERIA MOLDE', programada: true },
+  { cod: 2,  descripcion: 'DAÑO RESISTENCIAS CAÑON', programada: true },
+  { cod: 3,  descripcion: 'DAÑO ELECTRICO', programada: true },
+  { cod: 4,  descripcion: 'DAÑO MECANICO', programada: true },
+  { cod: 5,  descripcion: 'DAÑO SISTEMA CALIENTE MOLDE', programada: true },
+  { cod: 6,  descripcion: 'FALLA REFRIGERACION', programada: true },
+  { cod: 7,  descripcion: 'FALLA AIRE COMPRIMIDO', programada: true },
+  { cod: 8,  descripcion: 'FALLA SISTEMA HIDRAULICO', programada: true },
+  { cod: 9,  descripcion: 'ESPERA DE MANTENIMIENTO', programada: true },
+  { cod: 10, descripcion: 'FALTA DE ACEITE HIDRAULICO', programada: true },
+  { cod: 11, descripcion: 'DAÑO MEZCLADOR', programada: true },
+  { cod: 12, descripcion: 'FALLA EN EL SISTEMA DE LUBRICACION', programada: true },
+  { cod: 13, descripcion: 'CAMBIO DE MOLDE', programada: false },
+  { cod: 14, descripcion: 'MANTENIMIENTO PREVENTIVO', programada: false },
+  { cod: 15, descripcion: 'REUNION', programada: false },
+  { cod: 16, descripcion: 'PAUSAS ACTIVAS', programada: false },
+  { cod: 17, descripcion: 'CAMBIO DE COLOR', programada: false },
+  { cod: 18, descripcion: 'MANTENIMIENTO PLANTA ELECTRICA', programada: false },
+  { cod: 19, descripcion: 'LIMPIEZA Y DESINFECCION', programada: false },
+  { cod: 20, descripcion: 'DESAYUNO ALMUERZO, CENA', programada: false },
+  { cod: 21, descripcion: 'FALTA DE OPERARIO', programada: false },
+  { cod: 22, descripcion: 'FALTA DE MATERIAL EXTERNO', programada: false },
+  { cod: 23, descripcion: 'FALLA PLANTA ELECTRICA', programada: false },
+  { cod: 24, descripcion: 'LIMPIEZA DE BOQUILLA Y/O PURGA', programada: false },
+  { cod: 25, descripcion: 'CALENTAMIENTO CAÑON', programada: false },
+  { cod: 26, descripcion: 'TERMINA ORDEN', programada: false },
+  { cod: 27, descripcion: 'OPERARIO EN OTRA ACTIVIDAD', programada: false },
+  { cod: 28, descripcion: 'PRUEBA DE MATERIAL', programada: false },
+  { cod: 29, descripcion: 'LIDER OCUPADO', programada: false },
+  { cod: 30, descripcion: 'EMPEZAR ORDEN', programada: false },
+  { cod: 31, descripcion: 'OPERARIO EN REPROCESO', programada: false },
+  { cod: 32, descripcion: 'MOLER MATERIAL', programada: false },
+  { cod: 33, descripcion: 'PRUEBA SOPLADORA', programada: false },
+  { cod: 34, descripcion: 'PARO MAQUINA C. CALIDAD', programada: false },
+  { cod: 35, descripcion: 'AJUSTE PROCESO', programada: false },
+  { cod: 36, descripcion: 'PICO DE ENERGIA', programada: false },
+  { cod: 37, descripcion: 'CORTE ENERGIA EXTERIOR', programada: false },
+  { cod: 38, descripcion: 'MALA LIMPIEZA DE CAÑON', programada: false },
+  { cod: 39, descripcion: 'FALTA DE MATERIAL INTERNO', programada: false },
+  { cod: 40, descripcion: 'ERROR EN LA MEZCLA', programada: false },
+];
+
+export const PARADAS_SOPLADO: Parada[] = [
+  { cod: 1,  descripcion: 'AVERIA MOLDE', programada: true },
+  { cod: 2,  descripcion: 'DAÑO RESISTENCIAS CAÑON', programada: true },
+  { cod: 3,  descripcion: 'DAÑO ELECTRICO', programada: true },
+  { cod: 4,  descripcion: 'DAÑO MECANICO', programada: true },
+  { cod: 5,  descripcion: 'DAÑO TROQUEL', programada: true },
+  { cod: 6,  descripcion: 'FALLA REFRIGERACION', programada: true },
+  { cod: 7,  descripcion: 'FALLA AIRE COMPRIMIDO', programada: true },
+  { cod: 8,  descripcion: 'FALLA SISTEMA HIDRAULICO', programada: true },
+  { cod: 9,  descripcion: 'ESPERA DE MANTENIMIENTO', programada: true },
+  { cod: 10, descripcion: 'FALTA DE ACEITE HIDRAULICO', programada: true },
+  { cod: 11, descripcion: 'FALLAS EN EL CARGADOR', programada: true },
+  { cod: 12, descripcion: 'FALLA EN EL SISTEMA DE LUBRICACION', programada: true },
+  { cod: 13, descripcion: 'CAMBIO DE MOLDE', programada: false },
+  { cod: 14, descripcion: 'MANTENIMIENTO PREVENTIVO', programada: false },
+  { cod: 15, descripcion: 'REUNION', programada: false },
+  { cod: 16, descripcion: 'PAUSAS ACTIVAS', programada: false },
+  { cod: 17, descripcion: 'CAMBIO DE COLOR', programada: false },
+  { cod: 18, descripcion: 'MANTENIMIENTO PLANTA ELECTRICA', programada: false },
+  { cod: 19, descripcion: 'LIMPIEZA Y DESINFECCION', programada: false },
+  { cod: 20, descripcion: 'DESAYUNO ALMUERZO, CENA', programada: false },
+  { cod: 21, descripcion: 'FALTA DE OPERARIO', programada: false },
+  { cod: 22, descripcion: 'FALTA DE MATERIAL EXTERNO', programada: false },
+  { cod: 23, descripcion: 'FALLA PLANTA ELECTRICA', programada: false },
+  { cod: 24, descripcion: 'LIMPIEZA DE BOQUILLA Y/O PURGA', programada: false },
+  { cod: 25, descripcion: 'CALENTAMIENTO CAÑON', programada: false },
+  { cod: 26, descripcion: 'TERMINA ORDEN', programada: false },
+  { cod: 27, descripcion: 'OPERARIO EN OTRA ACTIVIDAD', programada: false },
+  { cod: 28, descripcion: 'PRUEBA DE MATERIAL', programada: false },
+  { cod: 29, descripcion: 'LIDER OCUPADO', programada: false },
+  { cod: 30, descripcion: 'EMPEZAR ORDEN', programada: false },
+  { cod: 31, descripcion: 'OPERARIO EN REPROCESO', programada: false },
+  { cod: 32, descripcion: 'MOLER MATERIAL', programada: false },
+  { cod: 33, descripcion: 'PRUEBA SOPLADORA', programada: false },
+  { cod: 34, descripcion: 'PARO MAQUINA C. CALIDAD', programada: false },
+  { cod: 35, descripcion: 'AJUSTE PROCESO', programada: false },
+  { cod: 36, descripcion: 'PICO DE ENERGIA', programada: false },
+  { cod: 37, descripcion: 'CORTE ENERGIA EXTERIOR', programada: false },
+  { cod: 38, descripcion: 'MALA LIMPIEZA DE CAÑON', programada: false },
+  { cod: 39, descripcion: 'FALTA DE MATERIAL INTERNO', programada: false },
+  { cod: 40, descripcion: 'ERROR EN LA MEZCLA', programada: false },
+  { cod: 41, descripcion: 'LIMPIEZA DEL PIN DE SOPLADO', programada: false },
+  { cod: 42, descripcion: 'MATERIAL CONTAMINADO', programada: false },
+  { cod: 43, descripcion: 'DAÑADAS POR OPERARIO', programada: false },
+  { cod: 44, descripcion: 'AJUSTE PROCESO MANTENIMIENTO', programada: false },
+];
+
+export const PARADAS_LINEA: Parada[] = [
+  { cod: 1,  descripcion: 'FALLAS EN LA TAPADORA', programada: true },
+  { cod: 2,  descripcion: 'FALLA SELLADORA', programada: true },
+  { cod: 3,  descripcion: 'FALLA DE CORTE', programada: true },
+  { cod: 4,  descripcion: 'DAÑO ELECTRICO', programada: true },
+  { cod: 5,  descripcion: 'DAÑO MECANICO', programada: true },
+  { cod: 6,  descripcion: 'FALLA AIRE COMPRIMIDO', programada: true },
+  { cod: 7,  descripcion: 'FALLA PLANTA ELECTRICA', programada: true },
+  { cod: 8,  descripcion: 'FALLA DEL CONTADOR', programada: true },
+  { cod: 9,  descripcion: 'FALLA DE ETIQUETADORA', programada: true },
+  { cod: 10, descripcion: 'FALLA EN EL TAMBOR', programada: true },
+  { cod: 11, descripcion: 'BIOPP QUEMADO', programada: true },
+  { cod: 12, descripcion: 'AIRE CONTAMINADO CON AGUA', programada: true },
+  { cod: 13, descripcion: 'ROTURA DE CADENA ALIMENTACION TAPA', programada: false },
+  { cod: 14, descripcion: 'FALTA DE TAPA', programada: false },
+  { cod: 15, descripcion: 'TAPA DEFECTUOSA', programada: false },
+  { cod: 16, descripcion: 'FALLA EN LA PELICULA', programada: false },
+  { cod: 17, descripcion: 'FALTA DE MATERIAL', programada: false },
+  { cod: 18, descripcion: 'PICO DE ENERGIA', programada: false },
+  { cod: 19, descripcion: 'CORTE ENERGIA EXTERIOR', programada: false },
+  { cod: 20, descripcion: 'MAL LOTE DE ETIQUETA', programada: false },
+  { cod: 21, descripcion: 'BIOPP DEFECTUOSO', programada: false },
+  { cod: 22, descripcion: 'ERROR DE EMPAQUE', programada: false },
+  { cod: 23, descripcion: 'PRUEBAS DE BIOPP', programada: false },
+  { cod: 24, descripcion: 'FALLAS Y CALIBRACION BALANZA', programada: false },
+  { cod: 25, descripcion: 'OPERARIO EN OTRA ACTIVIDAD', programada: false },
+  { cod: 26, descripcion: 'CAMBIO DE BOBINA', programada: false },
+  { cod: 27, descripcion: 'MANTENIMIENTO PREVENTIVO', programada: false },
+  { cod: 28, descripcion: 'REUNION', programada: false },
+  { cod: 29, descripcion: 'PAUSAS ACTIVAS', programada: false },
+  { cod: 30, descripcion: 'MANTENIMIENTO PLANTA ELECTRICA', programada: false },
+  { cod: 31, descripcion: 'LIMPIEZA Y DESINFECCION', programada: false },
+  { cod: 32, descripcion: 'DESAYUNO ALMUERZO, CENA', programada: false },
+  { cod: 33, descripcion: 'FALTA DE OPERARIO', programada: false },
+  { cod: 34, descripcion: 'CAMBIO DE ORDEN', programada: false },
+  { cod: 35, descripcion: 'TEC. MTTO. OCUPADO', programada: false },
+  { cod: 36, descripcion: 'FRASCO DEFECTUOSO', programada: false },
+  { cod: 37, descripcion: 'TERMINA ORDEN', programada: false },
+  { cod: 38, descripcion: 'ALISTAMIENTO INICIO ORDEN', programada: false },
+  { cod: 39, descripcion: 'PARADAS POR OPERARIO', programada: false },
+  { cod: 40, descripcion: 'LIMPIEZA DE TAMBOR', programada: false },
+  { cod: 41, descripcion: 'LLENADO DE CAJAS', programada: false },
+  { cod: 42, descripcion: 'AJUSTE MECANICO DE PROCESO', programada: false },
+];
+
+export const DESPERDICIOS_INYECCION_SOPLADO: Desperdicio[] = [
+  { cod: 1,  defecto: 'REBABAS' },
+  { cod: 2,  defecto: 'LLENADO INCOMPLETO' },
+  { cod: 3,  defecto: 'PELLETS SIN FUNDIR' },
+  { cod: 4,  defecto: 'QUEMADAS (DIESEL)' },
+  { cod: 5,  defecto: 'DELAMINACION' },
+  { cod: 6,  defecto: 'BURBUJAS' },
+  { cod: 7,  defecto: 'GRIETAS' },
+  { cod: 8,  defecto: 'LINEAS DE FLUJO' },
+  { cod: 9,  defecto: 'LINEA DE UNION' },
+  { cod: 10, defecto: 'RECHUPES' },
+  { cod: 11, defecto: 'ALABEO' },
+  { cod: 12, defecto: 'MALA DISPERSION DEL COLOR' },
+  { cod: 13, defecto: 'FLUJO LIBRE' },
+  { cod: 14, defecto: 'RAFAGAS' },
+  { cod: 15, defecto: 'CONTAMINACION' },
+  { cod: 16, defecto: 'MARCAS DE EXPULSION' },
+  { cod: 17, defecto: 'DEFORMACION POR EXPULSION' },
+  { cod: 18, defecto: 'PIEZA CON GRASA' },
+  { cod: 19, defecto: 'COLOR FUERA DE ESTANDAR' },
+  { cod: 20, defecto: 'MOLDE RAYADO' },
+  { cod: 21, defecto: 'OXIDO' },
+  { cod: 22, defecto: 'PARTIDOS DE MAQUINA' },
+  { cod: 23, defecto: 'FUGA DE AGUA' },
+];
+
+export const DESPERDICIOS_LINEA: Desperdicio[] = [
+  { cod: 1,  defecto: 'REBABAS' },
+  { cod: 2,  defecto: 'LLENADO INCOMPLETO' },
+  { cod: 3,  defecto: 'PELLETS SIN FUNDIR' },
+  { cod: 4,  defecto: 'QUEMADAS (DIESEL)' },
+  { cod: 5,  defecto: 'DELAMINACION' },
+  { cod: 6,  defecto: 'BURBUJAS' },
+  { cod: 7,  defecto: 'GRIETAS' },
+  { cod: 8,  defecto: 'LINEAS DE FLUJO' },
+  { cod: 9,  defecto: 'LINEA DE UNION' },
+  { cod: 10, defecto: 'RECHUPES' },
+  { cod: 11, defecto: 'ALABEO' },
+  { cod: 12, defecto: 'MALA DISPERSION DEL COLOR' },
+  { cod: 13, defecto: 'FLUJO LIBRE' },
+  { cod: 14, defecto: 'RAFAGAS' },
+  { cod: 15, defecto: 'CONTAMINACION' },
+  { cod: 16, defecto: 'MARCAS DE EXPULSION' },
+  { cod: 17, defecto: 'DEFORMACION POR EXPULSION' },
+  { cod: 18, defecto: 'PIEZA CON GRASA' },
+  { cod: 19, defecto: 'COLOR FUERA DE ESTANDAR' },
+  { cod: 20, defecto: 'MOLDE RAYADO' },
+  { cod: 21, defecto: 'OXIDO' },
+  { cod: 22, defecto: 'FRASCO OVALADO' },
+];
+
+export function getParadas(tipo: TipoMaquina): Parada[] {
+  switch (tipo) {
+    case 'inyeccion': return PARADAS_INYECCION;
+    case 'soplado':   return PARADAS_SOPLADO;
+    case 'linea':     return PARADAS_LINEA;
+  }
+}
+
+export function getDesperdicios(tipo: TipoMaquina): Desperdicio[] {
+  switch (tipo) {
+    case 'inyeccion':
+    case 'soplado':   return DESPERDICIOS_INYECCION_SOPLADO;
+    case 'linea':     return DESPERDICIOS_LINEA;
+  }
+}
