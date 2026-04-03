@@ -38,23 +38,21 @@ export default function Pantalla1() {
   };
 
   const handleCodigoProducto = (valor: string) => {
-    setCodigoProducto(valor);
-    const producto = PRODUCTOS[valor];
-    if (producto) {
-      setDescripcionProducto(producto.descripcion);
-      setCantidadProducir(producto.cantidad.toString());
-      setMaterial(producto.material);
-      setCavidades(producto.cavidades.toString());
-      setCiclos(producto.ciclos.toString());
-    } else {
-      setDescripcionProducto('');
-      setCantidadProducir('');
-      setMaterial('');
-      setCavidades('');
-      setCiclos('');
-    }
-  };
-
+  setCodigoProducto(valor);
+  const producto = PRODUCTOS[valor];
+  if (producto) {
+    setDescripcionProducto(producto.descripcion);
+    setMaterial(producto.material);
+    setCavidades(producto.cavidades.toString());
+    setCiclos(producto.ciclos.toString());
+  } else {
+    setDescripcionProducto('');
+    setCantidadProducir('');
+    setMaterial('');
+    setCavidades('');
+    setCiclos('');
+  }
+};
   const handleGuardar = () => {
     if (!cedulaLider || !nombreLider || !numeroOrden || !codigoProducto || !numeroMaquina) {
       Alert.alert('Campos incompletos', 'Por favor completa todos los campos obligatorios');
@@ -131,7 +129,7 @@ export default function Pantalla1() {
         onChangeText={handleCodigoProducto}
         placeholder="Ingresa el código"
         placeholderTextColor="#475569"
-        keyboardType="numeric"
+        autoCapitalize ="characters"
       />
 
       <Text style={s.label}>Descripción de producto</Text>
@@ -143,13 +141,16 @@ export default function Pantalla1() {
 
       <View style={s.fila}>
         <View style={s.mitad}>
-          <Text style={s.label}>Cantidad a producir</Text>
-          <View style={s.inputAuto}>
-            <Text style={[s.inputAutoText, !cantidadProducir && s.placeholder]}>
-              {cantidadProducir || 'Auto'}
-            </Text>
-          </View>
-        </View>
+  <Text style={s.label}>Cantidad a producir</Text>
+  <TextInput
+    style={s.input}
+    value={cantidadProducir}
+    onChangeText={setCantidadProducir}
+    placeholder="Ingresa cantidad"
+    placeholderTextColor="#475569"
+    keyboardType="numeric"
+  />
+</View>
         <View style={s.mitad}>
           <Text style={s.label}>Tipo de material</Text>
           <View style={s.inputAuto}>

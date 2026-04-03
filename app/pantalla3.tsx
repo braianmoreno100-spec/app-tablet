@@ -7,13 +7,8 @@ import { useRouter } from 'expo-router';
 import { obtenerOrdenGlobal, limpiarOrdenGlobal } from '../store/useOrdenStore';
 import { obtenerTurnoGlobal, guardarTurnoGlobal } from './pantalla2';
 import { getParadas, getDesperdicios, Parada, Desperdicio } from '../constants/listas';
+import { EMPLEADOS } from '../constants/autocompletado';
 
-const EMPLEADOS: Record<string, string> = {
-  '11111111': 'Carlos Martínez',
-  '22222222': 'Luisa Rodríguez',
-  '33333333': 'Andrés Pérez',
-  '44444444': 'Diana Torres',
-};
 
 interface RegistroProduccion {
   hora: string;
@@ -256,7 +251,7 @@ const handleAgregarParada = () => {
         </Text>
       </TouchableOpacity>
 
-      
+
       <View style={s.fila}>
         <TextInput
           style={[s.input, { flex: 1 }]}
@@ -276,9 +271,7 @@ const handleAgregarParada = () => {
           {paradasRegistradas.map((p, i) => (
             <View key={i} style={s.registroFila}>
               <Text style={s.registroHora}>{p.cod}. {p.descripcion}</Text>
-              <Text style={[s.registroCantidad, { color: p.programada ? '#22c55e' : '#f97316' }]}>
-                {p.minutos} min
-              </Text>
+             <Text style={s.registroCantidad}>{p.minutos} min</Text>
             </View>
           ))}
         </View>
@@ -390,15 +383,17 @@ const handleAgregarParada = () => {
           <FlatList
             data={paradas}
             keyExtractor={item => item.cod.toString()}
-            renderItem={({ item }) => (
-             <TouchableOpacity
-  style={s.modalItem}
-  onPress={() => { setParadaSeleccionada(item); setModalParadas(false); }}
->
-  <Text style={s.modalItemCod}>{item.cod}.</Text>
-  <Text style={s.modalItemText}>{item.descripcion}</Text>
-</TouchableOpacity>
-            )}
+          
+           renderItem={({ item }) => (
+  <TouchableOpacity
+    style={s.modalItem}
+    onPress={() => { setParadaSeleccionada(item); setModalParadas(false); }}
+  >
+    <Text style={s.modalItemCod}>{item.cod}.</Text>
+    <Text style={s.modalItemText}>{item.descripcion}</Text>
+  </TouchableOpacity>
+)}
+
           />
           <TouchableOpacity style={s.btnCerrar} onPress={() => setModalParadas(false)}>
             <Text style={s.btnCerrarText}>Cancelar</Text>

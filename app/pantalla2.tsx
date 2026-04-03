@@ -6,13 +6,8 @@ import {
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { obtenerOrdenGlobal } from '../store/useOrdenStore';
+import { EMPLEADOS } from '../constants/autocompletado';
 
-const EMPLEADOS: Record<string, string> = {
-  '11111111': 'Carlos Martínez',
-  '22222222': 'Luisa Rodríguez',
-  '33333333': 'Andrés Pérez',
-  '44444444': 'Diana Torres',
-};
 
 const TURNOS = [
   '6:00 am - 6:00 pm',
