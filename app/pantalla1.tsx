@@ -142,14 +142,19 @@ export default function Pantalla1() {
       <View style={s.fila}>
         <View style={s.mitad}>
   <Text style={s.label}>Cantidad a producir</Text>
-  <TextInput
-    style={s.input}
-    value={cantidadProducir}
-    onChangeText={setCantidadProducir}
-    placeholder="Ingresa cantidad"
-    placeholderTextColor="#475569"
-    keyboardType="numeric"
-  />
+<TextInput
+  style={s.input}
+  value={cantidadProducir}
+  onChangeText={setCantidadProducir}
+  placeholder="Ingresa cantidad"
+  placeholderTextColor="#475569"
+  keyboardType="numeric"
+/>
+{cantidadProducir !== '' && (
+  <Text style={s.cantidadFormateada}>
+    {Number(cantidadProducir).toLocaleString('es-CO')} unidades
+  </Text>
+)}
 </View>
         <View style={s.mitad}>
           <Text style={s.label}>Tipo de material</Text>
@@ -283,4 +288,5 @@ const s = StyleSheet.create({
   btn:             { backgroundColor: '#6366f1', borderRadius: 14,
                      padding: 18, alignItems: 'center', marginTop: 16 },
   btnText:         { color: '#fff', fontSize: 17, fontWeight: '700' },
+  cantidadFormateada: { fontSize: 13, color: '#6366f1', marginTop: -10, marginBottom: 14 },
 });
