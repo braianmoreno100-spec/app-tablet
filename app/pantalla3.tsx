@@ -8,7 +8,18 @@ import { obtenerOrdenGlobal, limpiarOrdenGlobal } from '../store/useOrdenStore';
 import { obtenerTurnoGlobal, guardarTurnoGlobal } from './pantalla2';
 import { getParadas, getDesperdicios, Parada, Desperdicio } from '../constants/listas';
 import { EMPLEADOS } from '../constants/autocompletado';
-
+import {
+  apiAgregarProduccion,
+  apiAgregarParada,
+  apiAgregarDesperdicio,
+  apiIniciarRelevo,
+  apiCerrarRelevo,
+  apiCerrarTurno,
+  apiCerrarOrden,
+  obtenerTurnoId,
+  obtenerOrdenId,
+  limpiarIds,
+} from './services/api';
 
 interface RegistroProduccion {
   hora: string;
@@ -45,21 +56,25 @@ export default function Pantalla3() {
 
   const [produccion, setProduccion] = useState<RegistroProduccion[]>([]);
   const [unidadesHora, setUnidadesHora] = useState('');
+  const [guardandoProduccion, setGuardandoProduccion] = useState(false);
 
   const [paradasRegistradas, setParadasRegistradas] = useState<RegistroParada[]>([]);
   const [paradaSeleccionada, setParadaSeleccionada] = useState<Parada | null>(null);
   const [minutosParada, setMinutosParada] = useState('');
   const [modalParadas, setModalParadas] = useState(false);
+  const [guardandoParada, setGuardandoParada] = useState(false);
 
   const [desperdRegistrados, setDesperdRegistrados] = useState<RegistroDesperdicio[]>([]);
   const [desperdSeleccionado, setDesperdSeleccionado] = useState<Desperdicio | null>(null);
   const [cantidadDesperd, setCantidadDesperd] = useState('');
   const [modalDesperdicios, setModalDesperdicios] = useState(false);
+  const [guardandoDesperd, setGuardandoDesperd] = useState(false);
 
   const [cedulaRelevo, setCedulaRelevo] = useState('');
   const [nombreRelevo, setNombreRelevo] = useState('');
   const [relevoActivo, setRelevoActivo] = useState(false);
   const [horaInicioRelevo, setHoraInicioRelevo] = useState('');
+  const [relevoIdActivo, setRelevoIdActivo] = useState<number | null>(null);
   const [historialRelevos, setHistorialRelevos] = useState<RegistroRelevo[]>([]);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -90,37 +105,80 @@ export default function Pantalla3() {
     }
   };
 
-  const handleAgregarProduccion = () => {
+  const horaActual = () =>
+    new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+
+  // ── PRODUCCIÓN ─────────────────────────────────────────────
+
+  const handleAgregarProduccion = async () => {
     if (!unidadesHora || Number(unidadesHora) <= 0) {
       Alert.alert('Error', 'Ingresa una cantidad válida');
       return;
     }
-    const ahora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-    setProduccion(p => [...p, { hora: ahora, cantidad: Number(unidadesHora) }]);
-    setUnidadesHora('');
+
+    const hora = horaActual();
+    const cantidad = Number(unidadesHora);
+
+    setGuardandoProduccion(true);
+    try {
+      const turnoId = await obtenerTurnoId();
+      if (!turnoId) throw new Error('No hay turno activo');
+
+      await apiAgregarProduccion(turnoId, hora, cantidad);
+      setProduccion(p => [...p, { hora, cantidad }]);
+      setUnidadesHora('');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'No se pudo guardar el registro');
+    } finally {
+      setGuardandoProduccion(false);
+    }
   };
 
-const handleAgregarParada = () => {
-  if (!paradaSeleccionada) {
-    Alert.alert('Error', 'Selecciona el tipo de parada');
-    return;
-  }
-  if (!minutosParada || Number(minutosParada) <= 0) {
-    Alert.alert('Error', 'Ingresa los minutos de la parada');
-    return;
-  }
-  const esProgramada = paradasRegistradas.length < 12;
-  setParadasRegistradas(p => [...p, {
-    cod: paradaSeleccionada.cod,
-    descripcion: paradaSeleccionada.descripcion,
-    minutos: Number(minutosParada),
-    programada: esProgramada,
-  }]);
-  setParadaSeleccionada(null);
-  setMinutosParada('');
-};
+  // ── PARADAS ────────────────────────────────────────────────
 
-  const handleAgregarDesperdicio = () => {
+  const handleAgregarParada = async () => {
+    if (!paradaSeleccionada) {
+      Alert.alert('Error', 'Selecciona el tipo de parada');
+      return;
+    }
+    if (!minutosParada || Number(minutosParada) <= 0) {
+      Alert.alert('Error', 'Ingresa los minutos de la parada');
+      return;
+    }
+
+    const esProgramada = paradaSeleccionada.cod <= 12;
+
+    setGuardandoParada(true);
+    try {
+      const turnoId = await obtenerTurnoId();
+      if (!turnoId) throw new Error('No hay turno activo');
+
+      await apiAgregarParada({
+        turno_id: turnoId,
+        codigo: paradaSeleccionada.cod,
+        descripcion: paradaSeleccionada.descripcion,
+        minutos: Number(minutosParada),
+        programada: esProgramada,
+      });
+
+      setParadasRegistradas(p => [...p, {
+        cod: paradaSeleccionada.cod,
+        descripcion: paradaSeleccionada.descripcion,
+        minutos: Number(minutosParada),
+        programada: esProgramada,
+      }]);
+      setParadaSeleccionada(null);
+      setMinutosParada('');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'No se pudo guardar la parada');
+    } finally {
+      setGuardandoParada(false);
+    }
+  };
+
+  // ── DESPERDICIOS ───────────────────────────────────────────
+
+  const handleAgregarDesperdicio = async () => {
     if (!desperdSeleccionado) {
       Alert.alert('Error', 'Selecciona el tipo de defecto');
       return;
@@ -129,21 +187,41 @@ const handleAgregarParada = () => {
       Alert.alert('Error', 'Ingresa la cantidad de unidades rechazadas');
       return;
     }
-    setDesperdRegistrados(p => [...p, {
-      cod: desperdSeleccionado.cod,
-      defecto: desperdSeleccionado.defecto,
-      cantidad: Number(cantidadDesperd),
-    }]);
-    setDesperdSeleccionado(null);
-    setCantidadDesperd('');
+
+    setGuardandoDesperd(true);
+    try {
+      const turnoId = await obtenerTurnoId();
+      if (!turnoId) throw new Error('No hay turno activo');
+
+      await apiAgregarDesperdicio({
+        turno_id: turnoId,
+        codigo: desperdSeleccionado.cod,
+        defecto: desperdSeleccionado.defecto,
+        cantidad: Number(cantidadDesperd),
+      });
+
+      setDesperdRegistrados(p => [...p, {
+        cod: desperdSeleccionado.cod,
+        defecto: desperdSeleccionado.defecto,
+        cantidad: Number(cantidadDesperd),
+      }]);
+      setDesperdSeleccionado(null);
+      setCantidadDesperd('');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'No se pudo guardar el desperdicio');
+    } finally {
+      setGuardandoDesperd(false);
+    }
   };
+
+  // ── RELEVOS ────────────────────────────────────────────────
 
   const handleCedulaRelevo = (valor: string) => {
     setCedulaRelevo(valor);
     setNombreRelevo(EMPLEADOS[valor] || '');
   };
 
-  const handleInicioRelevo = () => {
+  const handleInicioRelevo = async () => {
     if (!cedulaRelevo || !nombreRelevo) {
       Alert.alert('Error', 'Ingresa la cédula del empleado en relevo');
       return;
@@ -152,36 +230,62 @@ const handleAgregarParada = () => {
       Alert.alert('Error', 'Ya hay un relevo activo');
       return;
     }
-    const hora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-    setHoraInicioRelevo(hora);
-    setRelevoActivo(true);
+
+    const hora = horaActual();
+    try {
+      const turnoId = await obtenerTurnoId();
+      if (!turnoId) throw new Error('No hay turno activo');
+
+      const resp = await apiIniciarRelevo({
+        turno_id: turnoId,
+        cedula_empleado: cedulaRelevo,
+        nombre_empleado: nombreRelevo,
+        hora_inicio: hora,
+      });
+
+      setRelevoIdActivo(resp.id);
+      setHoraInicioRelevo(hora);
+      setRelevoActivo(true);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'No se pudo registrar el relevo');
+    }
   };
 
-  const handleFinRelevo = () => {
-    if (!relevoActivo) {
+  const handleFinRelevo = async () => {
+    if (!relevoActivo || !relevoIdActivo) {
       Alert.alert('Error', 'No hay un relevo activo');
       return;
     }
-    const hora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-    setHistorialRelevos(h => [...h, {
-      nombre: nombreRelevo,
-      inicio: horaInicioRelevo,
-      fin: hora,
-    }]);
-    setRelevoActivo(false);
-    setCedulaRelevo('');
-    setNombreRelevo('');
-    setHoraInicioRelevo('');
+
+    const hora = horaActual();
+    try {
+      await apiCerrarRelevo(relevoIdActivo, hora);
+      setHistorialRelevos(h => [...h, {
+        nombre: nombreRelevo,
+        inicio: horaInicioRelevo,
+        fin: hora,
+      }]);
+      setRelevoActivo(false);
+      setRelevoIdActivo(null);
+      setCedulaRelevo('');
+      setNombreRelevo('');
+      setHoraInicioRelevo('');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'No se pudo cerrar el relevo');
+    }
   };
 
-  const totalProducido = produccion.reduce((acc, r) => acc + r.cantidad, 0);
-  const totalDesperdicios = desperdRegistrados.reduce((acc, r) => acc + r.cantidad, 0);
+  // ── FIN TURNO / FIN ORDEN ──────────────────────────────────
 
   const handleFinTurno = () => {
     Alert.alert('Fin de turno', '¿Deseas cerrar el turno actual?', [
       { text: 'Cancelar', style: 'cancel' },
       {
-        text: 'Confirmar', onPress: () => {
+        text: 'Confirmar', onPress: async () => {
+          try {
+            const turnoId = await obtenerTurnoId();
+            if (turnoId) await apiCerrarTurno(turnoId, horaActual());
+          } catch (e) { /* silencioso */ }
           guardarTurnoGlobal(null);
           router.replace('/pantalla2');
         }
@@ -193,7 +297,14 @@ const handleAgregarParada = () => {
     Alert.alert('Fin de orden', '¿Deseas cerrar la orden completa?', [
       { text: 'Cancelar', style: 'cancel' },
       {
-        text: 'Confirmar', onPress: () => {
+        text: 'Confirmar', onPress: async () => {
+          try {
+            const turnoId = await obtenerTurnoId();
+            const ordenId = await obtenerOrdenId();
+            if (turnoId) await apiCerrarTurno(turnoId, horaActual());
+            if (ordenId) await apiCerrarOrden(ordenId);
+          } catch (e) { /* silencioso */ }
+          await limpiarIds();
           guardarTurnoGlobal(null);
           limpiarOrdenGlobal();
           router.replace('/pantalla1');
@@ -201,6 +312,9 @@ const handleAgregarParada = () => {
       }
     ]);
   };
+
+  const totalProducido = produccion.reduce((acc, r) => acc + r.cantidad, 0);
+  const totalDesperdicios = desperdRegistrados.reduce((acc, r) => acc + r.cantidad, 0);
 
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
@@ -213,8 +327,8 @@ const handleAgregarParada = () => {
       <Text style={s.info}>Orden: {orden?.numeroOrden} · {turno?.nombreEmpleado}</Text>
       <Text style={s.info}>Próximo registro: {proximaHora}</Text>
 
+      {/* ── PRODUCCIÓN ── */}
       <Text style={s.seccion}>Producción por hora</Text>
-
       <View style={s.fila}>
         <TextInput
           style={[s.input, { flex: 1 }]}
@@ -224,8 +338,12 @@ const handleAgregarParada = () => {
           placeholderTextColor="#475569"
           keyboardType="numeric"
         />
-        <TouchableOpacity style={s.btnAgregar} onPress={handleAgregarProduccion}>
-          <Text style={s.btnAgregarText}>+ Agregar</Text>
+        <TouchableOpacity
+          style={[s.btnAgregar, guardandoProduccion && s.btnDisabled]}
+          onPress={handleAgregarProduccion}
+          disabled={guardandoProduccion}
+        >
+          <Text style={s.btnAgregarText}>{guardandoProduccion ? '...' : '+ Agregar'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -241,8 +359,8 @@ const handleAgregarParada = () => {
         </View>
       )}
 
+      {/* ── PARADAS ── */}
       <Text style={s.seccion}>Paradas</Text>
-
       <TouchableOpacity style={s.selector} onPress={() => setModalParadas(true)}>
         <Text style={[s.selectorText, !paradaSeleccionada && s.placeholder]}>
           {paradaSeleccionada
@@ -250,7 +368,6 @@ const handleAgregarParada = () => {
             : 'Selecciona el tipo de parada'}
         </Text>
       </TouchableOpacity>
-
 
       <View style={s.fila}>
         <TextInput
@@ -261,8 +378,12 @@ const handleAgregarParada = () => {
           placeholderTextColor="#475569"
           keyboardType="numeric"
         />
-        <TouchableOpacity style={s.btnAgregar} onPress={handleAgregarParada}>
-          <Text style={s.btnAgregarText}>+ Agregar</Text>
+        <TouchableOpacity
+          style={[s.btnAgregar, guardandoParada && s.btnDisabled]}
+          onPress={handleAgregarParada}
+          disabled={guardandoParada}
+        >
+          <Text style={s.btnAgregarText}>{guardandoParada ? '...' : '+ Agregar'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -271,14 +392,14 @@ const handleAgregarParada = () => {
           {paradasRegistradas.map((p, i) => (
             <View key={i} style={s.registroFila}>
               <Text style={s.registroHora}>{p.cod}. {p.descripcion}</Text>
-             <Text style={s.registroCantidad}>{p.minutos} min</Text>
+              <Text style={s.registroCantidad}>{p.minutos} min</Text>
             </View>
           ))}
         </View>
       )}
 
+      {/* ── DESPERDICIOS ── */}
       <Text style={s.seccion}>Desperdicios</Text>
-
       <TouchableOpacity style={s.selector} onPress={() => setModalDesperdicios(true)}>
         <Text style={[s.selectorText, !desperdSeleccionado && s.placeholder]}>
           {desperdSeleccionado
@@ -296,8 +417,12 @@ const handleAgregarParada = () => {
           placeholderTextColor="#475569"
           keyboardType="numeric"
         />
-        <TouchableOpacity style={s.btnAgregar} onPress={handleAgregarDesperdicio}>
-          <Text style={s.btnAgregarText}>+ Agregar</Text>
+        <TouchableOpacity
+          style={[s.btnAgregar, guardandoDesperd && s.btnDisabled]}
+          onPress={handleAgregarDesperdicio}
+          disabled={guardandoDesperd}
+        >
+          <Text style={s.btnAgregarText}>{guardandoDesperd ? '...' : '+ Agregar'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -313,8 +438,8 @@ const handleAgregarParada = () => {
         </View>
       )}
 
+      {/* ── RELEVOS ── */}
       <Text style={s.seccion}>Relevo</Text>
-
       <Text style={s.label}>Cédula del empleado en relevo</Text>
       <TextInput
         style={s.input}
@@ -368,6 +493,7 @@ const handleAgregarParada = () => {
         </View>
       )}
 
+      {/* ── BOTONES FINALES ── */}
       <View style={s.botonesFinales}>
         <TouchableOpacity style={s.btnTurno} onPress={handleFinTurno}>
           <Text style={s.btnFinText}>Fin de turno</Text>
@@ -377,23 +503,22 @@ const handleAgregarParada = () => {
         </TouchableOpacity>
       </View>
 
+      {/* ── MODAL PARADAS ── */}
       <Modal visible={modalParadas} animationType="slide">
         <View style={s.modal}>
           <Text style={s.modalTitulo}>Selecciona la parada</Text>
           <FlatList
             data={paradas}
             keyExtractor={item => item.cod.toString()}
-          
-           renderItem={({ item }) => (
-  <TouchableOpacity
-    style={s.modalItem}
-    onPress={() => { setParadaSeleccionada(item); setModalParadas(false); }}
-  >
-    <Text style={s.modalItemCod}>{item.cod}.</Text>
-    <Text style={s.modalItemText}>{item.descripcion}</Text>
-  </TouchableOpacity>
-)}
-
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={s.modalItem}
+                onPress={() => { setParadaSeleccionada(item); setModalParadas(false); }}
+              >
+                <Text style={s.modalItemCod}>{item.cod}.</Text>
+                <Text style={s.modalItemText}>{item.descripcion}</Text>
+              </TouchableOpacity>
+            )}
           />
           <TouchableOpacity style={s.btnCerrar} onPress={() => setModalParadas(false)}>
             <Text style={s.btnCerrarText}>Cancelar</Text>
@@ -401,6 +526,7 @@ const handleAgregarParada = () => {
         </View>
       </Modal>
 
+      {/* ── MODAL DESPERDICIOS ── */}
       <Modal visible={modalDesperdicios} animationType="slide">
         <View style={s.modal}>
           <Text style={s.modalTitulo}>Selecciona el defecto</Text>
@@ -428,71 +554,63 @@ const handleAgregarParada = () => {
 }
 
 const s = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#0f172a' },
-  content:          { padding: 24, paddingTop: 50, paddingBottom: 40 },
-  etiquetaMeta:     { backgroundColor: '#1e1b4b', borderRadius: 12, padding: 16,
-                      flexDirection: 'row', justifyContent: 'space-between',
-                      alignItems: 'center', marginBottom: 12, borderWidth: 1,
-                      borderColor: '#4338ca' },
-  etiquetaLabel:    { fontSize: 13, color: '#a5b4fc' },
-  etiquetaValor:    { fontSize: 22, fontWeight: '700', color: '#818cf8' },
-  info:             { fontSize: 12, color: '#64748b', marginBottom: 4 },
-  seccion:          { fontSize: 13, fontWeight: '600', color: '#6366f1',
-                      textTransform: 'uppercase', letterSpacing: 1,
-                      marginTop: 24, marginBottom: 12 },
-  label:            { fontSize: 13, color: '#94a3b8', marginBottom: 6 },
-  fila:             { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  input:            { backgroundColor: '#1e293b', borderRadius: 10, padding: 14,
-                      fontSize: 15, color: '#f1f5f9', borderWidth: 1,
-                      borderColor: '#334155' },
-  inputAuto:        { backgroundColor: '#0f2744', borderRadius: 10, padding: 14,
-                      marginBottom: 14, borderWidth: 1, borderColor: '#1e3a5f' },
-  inputAutoText:    { fontSize: 15, color: '#6366f1' },
-  placeholder:      { color: '#475569' },
-  btnAgregar:       { backgroundColor: '#6366f1', borderRadius: 10,
-                      paddingHorizontal: 16, justifyContent: 'center' },
-  btnAgregarText:   { color: '#fff', fontWeight: '700', fontSize: 13 },
-  listaRegistros:   { backgroundColor: '#1e293b', borderRadius: 10, padding: 12,
-                      marginBottom: 14, borderWidth: 1, borderColor: '#334155' },
-  totalText:        { fontSize: 13, color: '#6366f1', fontWeight: '700', marginBottom: 8 },
-  registroFila:     { flexDirection: 'row', justifyContent: 'space-between',
-                      paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#334155' },
-  registroHora:     { fontSize: 12, color: '#94a3b8', flex: 1 },
-  registroCantidad: { fontSize: 12, color: '#f1f5f9', fontWeight: '600' },
-  selector:         { backgroundColor: '#1e293b', borderRadius: 10, padding: 16,
-                      marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
-  selectorText:     { fontSize: 14, color: '#f1f5f9' },
-  badge:            { borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4,
-                      marginBottom: 12, alignSelf: 'flex-start' },
-  badgeProg:        { backgroundColor: '#14532d' },
-  badgeNoProg:      { backgroundColor: '#7c2d12' },
-  badgeText:        { fontSize: 11, fontWeight: '600', color: '#fff' },
+  container:         { flex: 1, backgroundColor: '#0f172a' },
+  content:           { padding: 24, paddingTop: 50, paddingBottom: 40 },
+  etiquetaMeta:      { backgroundColor: '#1e1b4b', borderRadius: 12, padding: 16,
+                       flexDirection: 'row', justifyContent: 'space-between',
+                       alignItems: 'center', marginBottom: 12, borderWidth: 1,
+                       borderColor: '#4338ca' },
+  etiquetaLabel:     { fontSize: 13, color: '#a5b4fc' },
+  etiquetaValor:     { fontSize: 22, fontWeight: '700', color: '#818cf8' },
+  info:              { fontSize: 12, color: '#64748b', marginBottom: 4 },
+  seccion:           { fontSize: 13, fontWeight: '600', color: '#6366f1',
+                       textTransform: 'uppercase', letterSpacing: 1,
+                       marginTop: 24, marginBottom: 12 },
+  label:             { fontSize: 13, color: '#94a3b8', marginBottom: 6 },
+  fila:              { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  input:             { backgroundColor: '#1e293b', borderRadius: 10, padding: 14,
+                       fontSize: 15, color: '#f1f5f9', borderWidth: 1,
+                       borderColor: '#334155' },
+  inputAuto:         { backgroundColor: '#0f2744', borderRadius: 10, padding: 14,
+                       marginBottom: 14, borderWidth: 1, borderColor: '#1e3a5f' },
+  inputAutoText:     { fontSize: 15, color: '#6366f1' },
+  placeholder:       { color: '#475569' },
+  btnAgregar:        { backgroundColor: '#6366f1', borderRadius: 10,
+                       paddingHorizontal: 16, justifyContent: 'center' },
+  btnAgregarText:    { color: '#fff', fontWeight: '700', fontSize: 13 },
+  btnDisabled:       { opacity: 0.4 },
+  listaRegistros:    { backgroundColor: '#1e293b', borderRadius: 10, padding: 12,
+                       marginBottom: 14, borderWidth: 1, borderColor: '#334155' },
+  totalText:         { fontSize: 13, color: '#6366f1', fontWeight: '700', marginBottom: 8 },
+  registroFila:      { flexDirection: 'row', justifyContent: 'space-between',
+                       paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#334155' },
+  registroHora:      { fontSize: 12, color: '#94a3b8', flex: 1 },
+  registroCantidad:  { fontSize: 12, color: '#f1f5f9', fontWeight: '600' },
+  selector:          { backgroundColor: '#1e293b', borderRadius: 10, padding: 16,
+                       marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
+  selectorText:      { fontSize: 14, color: '#f1f5f9' },
   relevoActivoBadge: { backgroundColor: '#14532d', borderRadius: 8, padding: 10,
                        marginBottom: 12, borderWidth: 1, borderColor: '#16a34a' },
-  relevoActivoText: { fontSize: 13, color: '#86efac', fontWeight: '600' },
-  btnRelevo:        { flex: 1, backgroundColor: '#0f6e56', borderRadius: 10,
-                      padding: 14, alignItems: 'center' },
-  btnRelevoFin:     { flex: 1, backgroundColor: '#7c2d12', borderRadius: 10,
-                      padding: 14, alignItems: 'center' },
-  btnRelevoText:    { color: '#fff', fontWeight: '700', fontSize: 13 },
-  btnDisabled:      { opacity: 0.4 },
-  botonesFinales:   { flexDirection: 'row', gap: 12, marginTop: 24 },
-  btnTurno:         { flex: 1, backgroundColor: '#0f6e56', borderRadius: 12,
-                      padding: 16, alignItems: 'center' },
-  btnOrden:         { flex: 1, backgroundColor: '#991b1b', borderRadius: 12,
-                      padding: 16, alignItems: 'center' },
-  btnFinText:       { color: '#fff', fontWeight: '700', fontSize: 15 },
-  modal:            { flex: 1, backgroundColor: '#0f172a', padding: 20, paddingTop: 60 },
-  modalTitulo:      { fontSize: 18, fontWeight: '700', color: '#f1f5f9', marginBottom: 16 },
-  modalItem:        { flexDirection: 'row', gap: 10, padding: 14,
-                      borderBottomWidth: 1, borderBottomColor: '#1e293b',
-                      alignItems: 'flex-start' },
-  modalItemProg:    { backgroundColor: '#0a1628' },
-  modalItemNoProg:  { backgroundColor: '#0f172a' },
-  modalItemCod:     { fontSize: 14, color: '#6366f1', fontWeight: '700', minWidth: 28 },
-  modalItemText:    { fontSize: 14, color: '#f1f5f9' },
-  modalItemTipo:    { fontSize: 11, color: '#64748b', marginTop: 2 },
-  btnCerrar:        { backgroundColor: '#1e293b', borderRadius: 12,
-                      padding: 16, alignItems: 'center', marginTop: 16 },
-  btnCerrarText:    { color: '#94a3b8', fontWeight: '600', fontSize: 15 },
+  relevoActivoText:  { fontSize: 13, color: '#86efac', fontWeight: '600' },
+  btnRelevo:         { flex: 1, backgroundColor: '#0f6e56', borderRadius: 10,
+                       padding: 14, alignItems: 'center' },
+  btnRelevoFin:      { flex: 1, backgroundColor: '#7c2d12', borderRadius: 10,
+                       padding: 14, alignItems: 'center' },
+  btnRelevoText:     { color: '#fff', fontWeight: '700', fontSize: 13 },
+  botonesFinales:    { flexDirection: 'row', gap: 12, marginTop: 24 },
+  btnTurno:          { flex: 1, backgroundColor: '#0f6e56', borderRadius: 12,
+                       padding: 16, alignItems: 'center' },
+  btnOrden:          { flex: 1, backgroundColor: '#991b1b', borderRadius: 12,
+                       padding: 16, alignItems: 'center' },
+  btnFinText:        { color: '#fff', fontWeight: '700', fontSize: 15 },
+  modal:             { flex: 1, backgroundColor: '#0f172a', padding: 20, paddingTop: 60 },
+  modalTitulo:       { fontSize: 18, fontWeight: '700', color: '#f1f5f9', marginBottom: 16 },
+  modalItem:         { flexDirection: 'row', gap: 10, padding: 14,
+                       borderBottomWidth: 1, borderBottomColor: '#1e293b',
+                       alignItems: 'flex-start' },
+  modalItemCod:      { fontSize: 14, color: '#6366f1', fontWeight: '700', minWidth: 28 },
+  modalItemText:     { fontSize: 14, color: '#f1f5f9' },
+  btnCerrar:         { backgroundColor: '#1e293b', borderRadius: 12,
+                       padding: 16, alignItems: 'center', marginTop: 16 },
+  btnCerrarText:     { color: '#94a3b8', fontWeight: '600', fontSize: 15 },
 });

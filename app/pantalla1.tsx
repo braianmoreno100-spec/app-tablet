@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, Switch, Alert
+  StyleSheet, ScrollView, Switch, Alert, ActivityIndicator
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { guardarOrdenGlobal } from '../store/useOrdenStore';
 import { LIDERES, PRODUCTOS } from '../constants/autocompletado';
 import { TipoMaquina } from '../constants/listas';
+import { apiCrearOrden, guardarOrdenId } from './services/api';
 
 const TIPOS_MAQUINA: { label: string; value: TipoMaquina }[] = [
   { label: 'Inyección', value: 'inyeccion' },
@@ -31,6 +32,7 @@ export default function Pantalla1() {
   const [tienePigmento, setTienePigmento] = useState(false);
   const [numeroPigmento, setNumeroPigmento] = useState('');
   const [descripcionPigmento, setDescripcionPigmento] = useState('');
+  const [cargando, setCargando] = useState(false);
 
   const handleCedulaLider = (valor: string) => {
     setCedulaLider(valor);
@@ -38,22 +40,23 @@ export default function Pantalla1() {
   };
 
   const handleCodigoProducto = (valor: string) => {
-  setCodigoProducto(valor);
-  const producto = PRODUCTOS[valor];
-  if (producto) {
-    setDescripcionProducto(producto.descripcion);
-    setMaterial(producto.material);
-    setCavidades(producto.cavidades.toString());
-    setCiclos(producto.ciclos.toString());
-  } else {
-    setDescripcionProducto('');
-    setCantidadProducir('');
-    setMaterial('');
-    setCavidades('');
-    setCiclos('');
-  }
-};
-  const handleGuardar = () => {
+    setCodigoProducto(valor);
+    const producto = PRODUCTOS[valor];
+    if (producto) {
+      setDescripcionProducto(producto.descripcion);
+      setMaterial(producto.material);
+      setCavidades(producto.cavidades.toString());
+      setCiclos(producto.ciclos.toString());
+    } else {
+      setDescripcionProducto('');
+      setCantidadProducir('');
+      setMaterial('');
+      setCavidades('');
+      setCiclos('');
+    }
+  };
+
+  const handleGuardar = async () => {
     if (!cedulaLider || !nombreLider || !numeroOrden || !codigoProducto || !numeroMaquina) {
       Alert.alert('Campos incompletos', 'Por favor completa todos los campos obligatorios');
       return;
@@ -66,6 +69,8 @@ export default function Pantalla1() {
       Alert.alert('Datos de pigmento', 'Si lleva pigmento debes completar número y descripción');
       return;
     }
+
+    // Guardar en estado global local
     guardarOrdenGlobal({
       cedulaLider,
       nombreLider,
@@ -82,7 +87,34 @@ export default function Pantalla1() {
       numeroPigmento,
       descripcionPigmento,
     });
-    router.push('/pantalla2');
+
+    // Crear orden en el servidor
+    setCargando(true);
+    try {
+      const ordenCreada = await apiCrearOrden({
+        numero_orden: numeroOrden,
+        codigo_producto: codigoProducto,
+        descripcion_producto: descripcionProducto,
+        cantidad_producir: Number(cantidadProducir),
+        material,
+        tipo_maquina: tipoMaquina,
+        numero_maquina: numeroMaquina,
+        cavidades: Number(cavidades),
+        ciclos: Number(ciclos),
+        tiene_pigmento: tienePigmento,
+        numero_pigmento: numeroPigmento,
+        descripcion_pigmento: descripcionPigmento,
+        cedula_lider: cedulaLider,
+        nombre_lider: nombreLider,
+      });
+
+      await guardarOrdenId(ordenCreada.id);
+      router.push('/pantalla2');
+    } catch (error: any) {
+      Alert.alert('Error al guardar', error.message || 'No se pudo conectar al servidor');
+    } finally {
+      setCargando(false);
+    }
   };
 
   return (
@@ -129,7 +161,7 @@ export default function Pantalla1() {
         onChangeText={handleCodigoProducto}
         placeholder="Ingresa el código"
         placeholderTextColor="#475569"
-        autoCapitalize ="characters"
+        autoCapitalize="characters"
       />
 
       <Text style={s.label}>Descripción de producto</Text>
@@ -141,21 +173,21 @@ export default function Pantalla1() {
 
       <View style={s.fila}>
         <View style={s.mitad}>
-  <Text style={s.label}>Cantidad a producir</Text>
-<TextInput
-  style={s.input}
-  value={cantidadProducir}
-  onChangeText={setCantidadProducir}
-  placeholder="Ingresa cantidad"
-  placeholderTextColor="#475569"
-  keyboardType="numeric"
-/>
-{cantidadProducir !== '' && (
-  <Text style={s.cantidadFormateada}>
-    {Number(cantidadProducir).toLocaleString('es-CO')} unidades
-  </Text>
-)}
-</View>
+          <Text style={s.label}>Cantidad a producir</Text>
+          <TextInput
+            style={s.input}
+            value={cantidadProducir}
+            onChangeText={setCantidadProducir}
+            placeholder="Ingresa cantidad"
+            placeholderTextColor="#475569"
+            keyboardType="numeric"
+          />
+          {cantidadProducir !== '' && (
+            <Text style={s.cantidadFormateada}>
+              {Number(cantidadProducir).toLocaleString('es-CO')} unidades
+            </Text>
+          )}
+        </View>
         <View style={s.mitad}>
           <Text style={s.label}>Tipo de material</Text>
           <View style={s.inputAuto}>
@@ -245,8 +277,11 @@ export default function Pantalla1() {
         </View>
       )}
 
-      <TouchableOpacity style={s.btn} onPress={handleGuardar}>
-        <Text style={s.btnText}>Guardar orden y continuar →</Text>
+      <TouchableOpacity style={[s.btn, cargando && s.btnDisabled]} onPress={handleGuardar} disabled={cargando}>
+        {cargando
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={s.btnText}>Guardar orden y continuar →</Text>
+        }
       </TouchableOpacity>
 
     </ScrollView>
@@ -254,39 +289,40 @@ export default function Pantalla1() {
 }
 
 const s = StyleSheet.create({
-  container:       { flex: 1, backgroundColor: '#0f172a' },
-  content:         { padding: 24, paddingTop: 60, paddingBottom: 40 },
-  titulo:          { fontSize: 24, fontWeight: '700', color: '#f1f5f9', marginBottom: 4 },
-  subtitulo:       { fontSize: 14, color: '#94a3b8', marginBottom: 24 },
-  seccion:         { fontSize: 13, fontWeight: '600', color: '#6366f1',
-                     textTransform: 'uppercase', letterSpacing: 1,
-                     marginTop: 24, marginBottom: 12 },
-  label:           { fontSize: 13, color: '#94a3b8', marginBottom: 6 },
-  input:           { backgroundColor: '#1e293b', borderRadius: 10, padding: 14,
-                     fontSize: 15, color: '#f1f5f9', marginBottom: 14,
-                     borderWidth: 1, borderColor: '#334155' },
-  inputAuto:       { backgroundColor: '#0f2744', borderRadius: 10, padding: 14,
-                     marginBottom: 14, borderWidth: 1, borderColor: '#1e3a5f' },
-  inputAutoText:   { fontSize: 15, color: '#6366f1' },
-  placeholder:     { color: '#334155' },
-  fila:            { flexDirection: 'row', gap: 12 },
-  mitad:           { flex: 1 },
-  turnoCard:       { flexDirection: 'row', alignItems: 'center', gap: 12,
-                     backgroundColor: '#1e293b', borderRadius: 10, padding: 16,
-                     marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
-  turnoActivo:     { borderColor: '#6366f1', backgroundColor: '#1e1b4b' },
-  radio:           { width: 20, height: 20, borderRadius: 10,
-                     borderWidth: 2, borderColor: '#475569' },
-  radioActivo:     { borderColor: '#6366f1', backgroundColor: '#6366f1' },
-  turnoText:       { fontSize: 15, color: '#94a3b8' },
-  turnoTextActivo: { color: '#f1f5f9', fontWeight: '600' },
-  toggleFila:      { flexDirection: 'row', justifyContent: 'space-between',
-                     alignItems: 'center', backgroundColor: '#1e293b',
-                     borderRadius: 10, padding: 16, marginBottom: 14,
-                     borderWidth: 1, borderColor: '#334155' },
-  toggleLabel:     { fontSize: 15, color: '#f1f5f9' },
-  btn:             { backgroundColor: '#6366f1', borderRadius: 14,
-                     padding: 18, alignItems: 'center', marginTop: 16 },
-  btnText:         { color: '#fff', fontSize: 17, fontWeight: '700' },
+  container:          { flex: 1, backgroundColor: '#0f172a' },
+  content:            { padding: 24, paddingTop: 60, paddingBottom: 40 },
+  titulo:             { fontSize: 24, fontWeight: '700', color: '#f1f5f9', marginBottom: 4 },
+  subtitulo:          { fontSize: 14, color: '#94a3b8', marginBottom: 24 },
+  seccion:            { fontSize: 13, fontWeight: '600', color: '#6366f1',
+                        textTransform: 'uppercase', letterSpacing: 1,
+                        marginTop: 24, marginBottom: 12 },
+  label:              { fontSize: 13, color: '#94a3b8', marginBottom: 6 },
+  input:              { backgroundColor: '#1e293b', borderRadius: 10, padding: 14,
+                        fontSize: 15, color: '#f1f5f9', marginBottom: 14,
+                        borderWidth: 1, borderColor: '#334155' },
+  inputAuto:          { backgroundColor: '#0f2744', borderRadius: 10, padding: 14,
+                        marginBottom: 14, borderWidth: 1, borderColor: '#1e3a5f' },
+  inputAutoText:      { fontSize: 15, color: '#6366f1' },
+  placeholder:        { color: '#334155' },
+  fila:               { flexDirection: 'row', gap: 12 },
+  mitad:              { flex: 1 },
+  turnoCard:          { flexDirection: 'row', alignItems: 'center', gap: 12,
+                        backgroundColor: '#1e293b', borderRadius: 10, padding: 16,
+                        marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
+  turnoActivo:        { borderColor: '#6366f1', backgroundColor: '#1e1b4b' },
+  radio:              { width: 20, height: 20, borderRadius: 10,
+                        borderWidth: 2, borderColor: '#475569' },
+  radioActivo:        { borderColor: '#6366f1', backgroundColor: '#6366f1' },
+  turnoText:          { fontSize: 15, color: '#94a3b8' },
+  turnoTextActivo:    { color: '#f1f5f9', fontWeight: '600' },
+  toggleFila:         { flexDirection: 'row', justifyContent: 'space-between',
+                        alignItems: 'center', backgroundColor: '#1e293b',
+                        borderRadius: 10, padding: 16, marginBottom: 14,
+                        borderWidth: 1, borderColor: '#334155' },
+  toggleLabel:        { fontSize: 15, color: '#f1f5f9' },
+  btn:                { backgroundColor: '#6366f1', borderRadius: 14,
+                        padding: 18, alignItems: 'center', marginTop: 16 },
+  btnDisabled:        { opacity: 0.6 },
+  btnText:            { color: '#fff', fontSize: 17, fontWeight: '700' },
   cantidadFormateada: { fontSize: 13, color: '#6366f1', marginTop: -10, marginBottom: 14 },
 });

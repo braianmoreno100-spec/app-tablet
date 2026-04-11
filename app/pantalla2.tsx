@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, Alert
+  StyleSheet, ScrollView, Alert, ActivityIndicator
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { obtenerOrdenGlobal } from '../store/useOrdenStore';
 import { EMPLEADOS } from '../constants/autocompletado';
-
+import { apiIniciarTurno, guardarTurnoId, obtenerOrdenId } from './services/api';
 
 const TURNOS = [
   '6:00 am - 6:00 pm',
@@ -39,12 +39,16 @@ export default function Pantalla2() {
   const [cedulaEmpleado, setCedulaEmpleado] = useState('');
   const [nombreEmpleado, setNombreEmpleado] = useState('');
   const [turnoSeleccionado, setTurnoSeleccionado] = useState('');
+  const [cargando, setCargando] = useState(false);
 
   const fechaHoy = new Date().toLocaleDateString('es-CO', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
   });
+
+  // Fecha en formato YYYY-MM-DD para el servidor
+  const fechaServidor = new Date().toISOString().split('T')[0];
 
   const handleCedulaEmpleado = (valor: string) => {
     setCedulaEmpleado(valor);
@@ -62,11 +66,6 @@ export default function Pantalla2() {
     }
 
     const ahora = new Date();
-    const fechaInicio = ahora.toLocaleDateString('es-CO', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    });
     const horaInicio = ahora.toLocaleTimeString('es-CO', {
       hour: '2-digit',
       minute: '2-digit',
@@ -75,14 +74,39 @@ export default function Pantalla2() {
     const datosTurno = {
       cedulaEmpleado,
       nombreEmpleado,
-      fecha: fechaInicio,
+      fecha: fechaHoy,
       turno: turnoSeleccionado,
       horaInicio,
     };
 
     guardarTurnoGlobal(datosTurno);
     await AsyncStorage.setItem('turno_activo', JSON.stringify(datosTurno));
-    router.push('/pantalla3');
+
+    // Iniciar turno en el servidor
+    setCargando(true);
+    try {
+      const ordenId = await obtenerOrdenId();
+      if (!ordenId) {
+        Alert.alert('Error', 'No se encontró la orden activa. Vuelve a la pantalla anterior.');
+        return;
+      }
+
+      const turnoIniciado = await apiIniciarTurno({
+        orden_id: ordenId,
+        cedula_empleado: cedulaEmpleado,
+        nombre_empleado: nombreEmpleado,
+        turno: turnoSeleccionado,
+        hora_inicio: horaInicio,
+        fecha: fechaServidor,
+      });
+
+      await guardarTurnoId(turnoIniciado.turno_id);
+      router.push('/pantalla3');
+    } catch (error: any) {
+      Alert.alert('Error al iniciar turno', error.message || 'No se pudo conectar al servidor');
+    } finally {
+      setCargando(false);
+    }
   };
 
   return (
@@ -131,8 +155,11 @@ export default function Pantalla2() {
         </TouchableOpacity>
       ))}
 
-      <TouchableOpacity style={st.btn} onPress={handleIniciarTurno}>
-        <Text style={st.btnText}>Iniciar turno →</Text>
+      <TouchableOpacity style={[st.btn, cargando && st.btnDisabled]} onPress={handleIniciarTurno} disabled={cargando}>
+        {cargando
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={st.btnText}>Iniciar turno →</Text>
+        }
       </TouchableOpacity>
 
     </ScrollView>
@@ -166,5 +193,6 @@ const st = StyleSheet.create({
   turnoTextActivo: { color: '#f1f5f9', fontWeight: '600' },
   btn:             { backgroundColor: '#6366f1', borderRadius: 14,
                      padding: 18, alignItems: 'center', marginTop: 24 },
+  btnDisabled:     { opacity: 0.6 },
   btnText:         { color: '#fff', fontSize: 17, fontWeight: '700' },
 });
