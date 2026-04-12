@@ -19,7 +19,7 @@ import {
   obtenerTurnoId,
   obtenerOrdenId,
   limpiarIds,
-} from './services/api';
+} from '../store/services/api';
 
 interface RegistroProduccion {
   hora: string;

@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { obtenerOrdenGlobal } from '../store/useOrdenStore';
 import { EMPLEADOS } from '../constants/autocompletado';
-import { apiIniciarTurno, guardarTurnoId, obtenerOrdenId } from './services/api';
+import { apiIniciarTurno, guardarTurnoId, obtenerOrdenId } from '../store/services/api';
 
 const TURNOS = [
   '6:00 am - 6:00 pm',

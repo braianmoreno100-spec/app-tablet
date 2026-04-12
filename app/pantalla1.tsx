@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import { guardarOrdenGlobal } from '../store/useOrdenStore';
 import { LIDERES, PRODUCTOS } from '../constants/autocompletado';
 import { TipoMaquina } from '../constants/listas';
-import { apiCrearOrden, guardarOrdenId } from './services/api';
+import { apiCrearOrden, guardarOrdenId } from '../store/services/api';
 
 const TIPOS_MAQUINA: { label: string; value: TipoMaquina }[] = [
   { label: 'Inyección', value: 'inyeccion' },
