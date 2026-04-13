@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, Alert, Modal, FlatList
+  StyleSheet, ScrollView, Alert, Modal, FlatList,
+  ActivityIndicator, BackHandler
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { obtenerOrdenGlobal, limpiarOrdenGlobal } from '../store/useOrdenStore';
 import { obtenerTurnoGlobal, guardarTurnoGlobal } from './pantalla2';
-import { getParadas, getDesperdicios, Parada, Desperdicio } from '../constants/listas';
-import { EMPLEADOS } from '../constants/autocompletado';
 import {
   apiAgregarProduccion,
   apiAgregarParada,
@@ -19,31 +18,17 @@ import {
   obtenerTurnoId,
   obtenerOrdenId,
   limpiarIds,
+  apiValidarEmpleado,
+  apiGetCausasParada,
+  apiGetTiposDesperdicio,
+  CausaParadaAPI,
+  TipoDesperdicioAPI,
 } from '../store/services/api';
 
-interface RegistroProduccion {
-  hora: string;
-  cantidad: number;
-}
-
-interface RegistroParada {
-  cod: number;
-  descripcion: string;
-  minutos: number;
-  programada: boolean;
-}
-
-interface RegistroDesperdicio {
-  cod: number;
-  defecto: string;
-  cantidad: number;
-}
-
-interface RegistroRelevo {
-  nombre: string;
-  inicio: string;
-  fin: string;
-}
+interface RegistroProduccion { hora: string; cantidad: number; }
+interface RegistroParada { cod: number; descripcion: string; minutos: number; programada: boolean; }
+interface RegistroDesperdicio { cod: number; defecto: string; cantidad: number; }
+interface RegistroRelevo { nombre: string; inicio: string; fin: string; }
 
 export default function Pantalla3() {
   const router = useRouter();
@@ -51,21 +36,58 @@ export default function Pantalla3() {
   const turno = obtenerTurnoGlobal();
   const tipoMaquina = orden?.tipoMaquina ?? 'inyeccion';
 
-  const paradas = getParadas(tipoMaquina);
-  const desperdicios = getDesperdicios(tipoMaquina);
+  // ── BLOQUEAR BOTÓN ATRÁS ──────────────────────────────────
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      Alert.alert(
+        'Turno en curso',
+        'No puedes salir mientras hay un turno activo. Usa "Fin de turno" para cerrar el turno correctamente.',
+        [{ text: 'Entendido', style: 'cancel' }]
+      );
+      return true;
+    });
+    return () => backHandler.remove();
+  }, []);
 
+  // ── CATÁLOGOS DESDE BD ────────────────────────────────────
+  const [paradas, setParadas] = useState<CausaParadaAPI[]>([]);
+  const [desperdicios, setDesperdicios] = useState<TipoDesperdicioAPI[]>([]);
+  const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
+
+  useEffect(() => {
+    const cargarCatalogos = async () => {
+      try {
+        const [causas, tipos] = await Promise.all([
+          apiGetCausasParada(tipoMaquina),
+          apiGetTiposDesperdicio(),
+        ]);
+        setParadas(causas);
+        setDesperdicios(tipos);
+      } catch (error) {
+        Alert.alert(
+          'Aviso',
+          'No se pudieron cargar los catálogos desde el servidor. Verifica la conexión.'
+        );
+      } finally {
+        setCargandoCatalogos(false);
+      }
+    };
+    cargarCatalogos();
+  }, [tipoMaquina]);
+
+  // ── ESTADO ────────────────────────────────────────────────
   const [produccion, setProduccion] = useState<RegistroProduccion[]>([]);
   const [unidadesHora, setUnidadesHora] = useState('');
   const [guardandoProduccion, setGuardandoProduccion] = useState(false);
 
   const [paradasRegistradas, setParadasRegistradas] = useState<RegistroParada[]>([]);
-  const [paradaSeleccionada, setParadaSeleccionada] = useState<Parada | null>(null);
+  const [paradaSeleccionada, setParadaSeleccionada] = useState<CausaParadaAPI | null>(null);
   const [minutosParada, setMinutosParada] = useState('');
   const [modalParadas, setModalParadas] = useState(false);
   const [guardandoParada, setGuardandoParada] = useState(false);
 
   const [desperdRegistrados, setDesperdRegistrados] = useState<RegistroDesperdicio[]>([]);
-  const [desperdSeleccionado, setDesperdSeleccionado] = useState<Desperdicio | null>(null);
+  const [desperdSeleccionado, setDesperdSeleccionado] = useState<TipoDesperdicioAPI | null>(null);
   const [cantidadDesperd, setCantidadDesperd] = useState('');
   const [modalDesperdicios, setModalDesperdicios] = useState(false);
   const [guardandoDesperd, setGuardandoDesperd] = useState(false);
@@ -82,12 +104,8 @@ export default function Pantalla3() {
 
   useEffect(() => {
     calcularProximaHora();
-    intervalRef.current = setInterval(() => {
-      verificarHora();
-    }, 60000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    intervalRef.current = setInterval(() => { verificarHora(); }, 60000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, []);
 
   const calcularProximaHora = () => {
@@ -108,22 +126,18 @@ export default function Pantalla3() {
   const horaActual = () =>
     new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
 
-  // ── PRODUCCIÓN ─────────────────────────────────────────────
-
+  // ── PRODUCCIÓN ────────────────────────────────────────────
   const handleAgregarProduccion = async () => {
     if (!unidadesHora || Number(unidadesHora) <= 0) {
       Alert.alert('Error', 'Ingresa una cantidad válida');
       return;
     }
-
     const hora = horaActual();
     const cantidad = Number(unidadesHora);
-
     setGuardandoProduccion(true);
     try {
       const turnoId = await obtenerTurnoId();
       if (!turnoId) throw new Error('No hay turno activo');
-
       await apiAgregarProduccion(turnoId, hora, cantidad);
       setProduccion(p => [...p, { hora, cantidad }]);
       setUnidadesHora('');
@@ -134,38 +148,28 @@ export default function Pantalla3() {
     }
   };
 
-  // ── PARADAS ────────────────────────────────────────────────
-
+  // ── PARADAS ───────────────────────────────────────────────
   const handleAgregarParada = async () => {
-    if (!paradaSeleccionada) {
-      Alert.alert('Error', 'Selecciona el tipo de parada');
-      return;
-    }
+    if (!paradaSeleccionada) { Alert.alert('Error', 'Selecciona el tipo de parada'); return; }
     if (!minutosParada || Number(minutosParada) <= 0) {
-      Alert.alert('Error', 'Ingresa los minutos de la parada');
-      return;
+      Alert.alert('Error', 'Ingresa los minutos de la parada'); return;
     }
-
-    const esProgramada = paradaSeleccionada.cod <= 12;
-
     setGuardandoParada(true);
     try {
       const turnoId = await obtenerTurnoId();
       if (!turnoId) throw new Error('No hay turno activo');
-
       await apiAgregarParada({
         turno_id: turnoId,
-        codigo: paradaSeleccionada.cod,
+        codigo: paradaSeleccionada.codigo,
         descripcion: paradaSeleccionada.descripcion,
         minutos: Number(minutosParada),
-        programada: esProgramada,
+        programada: paradaSeleccionada.programada,
       });
-
       setParadasRegistradas(p => [...p, {
-        cod: paradaSeleccionada.cod,
+        cod: paradaSeleccionada.codigo,
         descripcion: paradaSeleccionada.descripcion,
         minutos: Number(minutosParada),
-        programada: esProgramada,
+        programada: paradaSeleccionada.programada,
       }]);
       setParadaSeleccionada(null);
       setMinutosParada('');
@@ -176,33 +180,25 @@ export default function Pantalla3() {
     }
   };
 
-  // ── DESPERDICIOS ───────────────────────────────────────────
-
+  // ── DESPERDICIOS ──────────────────────────────────────────
   const handleAgregarDesperdicio = async () => {
-    if (!desperdSeleccionado) {
-      Alert.alert('Error', 'Selecciona el tipo de defecto');
-      return;
-    }
+    if (!desperdSeleccionado) { Alert.alert('Error', 'Selecciona el tipo de defecto'); return; }
     if (!cantidadDesperd || Number(cantidadDesperd) <= 0) {
-      Alert.alert('Error', 'Ingresa la cantidad de unidades rechazadas');
-      return;
+      Alert.alert('Error', 'Ingresa la cantidad de unidades rechazadas'); return;
     }
-
     setGuardandoDesperd(true);
     try {
       const turnoId = await obtenerTurnoId();
       if (!turnoId) throw new Error('No hay turno activo');
-
       await apiAgregarDesperdicio({
         turno_id: turnoId,
-        codigo: desperdSeleccionado.cod,
-        defecto: desperdSeleccionado.defecto,
+        codigo: desperdSeleccionado.codigo,
+        defecto: desperdSeleccionado.descripcion,
         cantidad: Number(cantidadDesperd),
       });
-
       setDesperdRegistrados(p => [...p, {
-        cod: desperdSeleccionado.cod,
-        defecto: desperdSeleccionado.defecto,
+        cod: desperdSeleccionado.codigo,
+        defecto: desperdSeleccionado.descripcion,
         cantidad: Number(cantidadDesperd),
       }]);
       setDesperdSeleccionado(null);
@@ -214,35 +210,27 @@ export default function Pantalla3() {
     }
   };
 
-  // ── RELEVOS ────────────────────────────────────────────────
-
+  // ── RELEVOS ───────────────────────────────────────────────
   const handleCedulaRelevo = (valor: string) => {
     setCedulaRelevo(valor);
-    setNombreRelevo(EMPLEADOS[valor] || '');
+    setNombreRelevo('');
   };
 
   const handleInicioRelevo = async () => {
     if (!cedulaRelevo || !nombreRelevo) {
-      Alert.alert('Error', 'Ingresa la cédula del empleado en relevo');
-      return;
+      Alert.alert('Error', 'Ingresa la cédula del empleado en relevo'); return;
     }
-    if (relevoActivo) {
-      Alert.alert('Error', 'Ya hay un relevo activo');
-      return;
-    }
-
+    if (relevoActivo) { Alert.alert('Error', 'Ya hay un relevo activo'); return; }
     const hora = horaActual();
     try {
       const turnoId = await obtenerTurnoId();
       if (!turnoId) throw new Error('No hay turno activo');
-
       const resp = await apiIniciarRelevo({
         turno_id: turnoId,
         cedula_empleado: cedulaRelevo,
         nombre_empleado: nombreRelevo,
         hora_inicio: hora,
       });
-
       setRelevoIdActivo(resp.id);
       setHoraInicioRelevo(hora);
       setRelevoActivo(true);
@@ -253,10 +241,8 @@ export default function Pantalla3() {
 
   const handleFinRelevo = async () => {
     if (!relevoActivo || !relevoIdActivo) {
-      Alert.alert('Error', 'No hay un relevo activo');
-      return;
+      Alert.alert('Error', 'No hay un relevo activo'); return;
     }
-
     const hora = horaActual();
     try {
       await apiCerrarRelevo(relevoIdActivo, hora);
@@ -271,12 +257,12 @@ export default function Pantalla3() {
       setNombreRelevo('');
       setHoraInicioRelevo('');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo cerrar el relevo');
+      const msg = error?.message || error?.detail || 'No se pudo cerrar el relevo';
+      Alert.alert('Error', msg);
     }
   };
 
-  // ── FIN TURNO / FIN ORDEN ──────────────────────────────────
-
+  // ── FIN TURNO / FIN ORDEN ─────────────────────────────────
   const handleFinTurno = () => {
     Alert.alert('Fin de turno', '¿Deseas cerrar el turno actual?', [
       { text: 'Cancelar', style: 'cancel' },
@@ -285,9 +271,12 @@ export default function Pantalla3() {
           try {
             const turnoId = await obtenerTurnoId();
             if (turnoId) await apiCerrarTurno(turnoId, horaActual());
-          } catch (e) { /* silencioso */ }
-          guardarTurnoGlobal(null);
-          router.replace('/pantalla2');
+            guardarTurnoGlobal(null);
+            router.replace('/pantalla2');
+          } catch (error: any) {
+            const msg = error?.message || error?.detail || 'No se pudo cerrar el turno';
+            Alert.alert('Error', msg);
+          }
         }
       }
     ]);
@@ -303,7 +292,7 @@ export default function Pantalla3() {
             const ordenId = await obtenerOrdenId();
             if (turnoId) await apiCerrarTurno(turnoId, horaActual());
             if (ordenId) await apiCerrarOrden(ordenId);
-          } catch (e) { /* silencioso */ }
+          } catch (e) {}
           await limpiarIds();
           guardarTurnoGlobal(null);
           limpiarOrdenGlobal();
@@ -315,6 +304,16 @@ export default function Pantalla3() {
 
   const totalProducido = produccion.reduce((acc, r) => acc + r.cantidad, 0);
   const totalDesperdicios = desperdRegistrados.reduce((acc, r) => acc + r.cantidad, 0);
+
+  // ── LOADING ───────────────────────────────────────────────
+  if (cargandoCatalogos) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#6366f1" />
+        <Text style={{ color: '#94a3b8', marginTop: 16, fontSize: 14 }}>Cargando catálogos...</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
@@ -346,7 +345,6 @@ export default function Pantalla3() {
           <Text style={s.btnAgregarText}>{guardandoProduccion ? '...' : '+ Agregar'}</Text>
         </TouchableOpacity>
       </View>
-
       {produccion.length > 0 && (
         <View style={s.listaRegistros}>
           <Text style={s.totalText}>Total: {totalProducido} uds</Text>
@@ -364,11 +362,10 @@ export default function Pantalla3() {
       <TouchableOpacity style={s.selector} onPress={() => setModalParadas(true)}>
         <Text style={[s.selectorText, !paradaSeleccionada && s.placeholder]}>
           {paradaSeleccionada
-            ? `${paradaSeleccionada.cod}. ${paradaSeleccionada.descripcion}`
+            ? `${paradaSeleccionada.codigo}. ${paradaSeleccionada.descripcion}`
             : 'Selecciona el tipo de parada'}
         </Text>
       </TouchableOpacity>
-
       <View style={s.fila}>
         <TextInput
           style={[s.input, { flex: 1 }]}
@@ -386,7 +383,6 @@ export default function Pantalla3() {
           <Text style={s.btnAgregarText}>{guardandoParada ? '...' : '+ Agregar'}</Text>
         </TouchableOpacity>
       </View>
-
       {paradasRegistradas.length > 0 && (
         <View style={s.listaRegistros}>
           {paradasRegistradas.map((p, i) => (
@@ -403,11 +399,10 @@ export default function Pantalla3() {
       <TouchableOpacity style={s.selector} onPress={() => setModalDesperdicios(true)}>
         <Text style={[s.selectorText, !desperdSeleccionado && s.placeholder]}>
           {desperdSeleccionado
-            ? `${desperdSeleccionado.cod}. ${desperdSeleccionado.defecto}`
+            ? `${desperdSeleccionado.codigo}. ${desperdSeleccionado.descripcion}`
             : 'Selecciona el tipo de defecto'}
         </Text>
       </TouchableOpacity>
-
       <View style={s.fila}>
         <TextInput
           style={[s.input, { flex: 1 }]}
@@ -425,7 +420,6 @@ export default function Pantalla3() {
           <Text style={s.btnAgregarText}>{guardandoDesperd ? '...' : '+ Agregar'}</Text>
         </TouchableOpacity>
       </View>
-
       {desperdRegistrados.length > 0 && (
         <View style={s.listaRegistros}>
           <Text style={s.totalText}>Total rechazos: {totalDesperdicios} uds</Text>
@@ -445,25 +439,32 @@ export default function Pantalla3() {
         style={s.input}
         value={cedulaRelevo}
         onChangeText={handleCedulaRelevo}
+        onBlur={async () => {
+          if (cedulaRelevo.length >= 5) {
+            try {
+              const resp = await apiValidarEmpleado(cedulaRelevo);
+              setNombreRelevo(resp.nombre);
+            } catch {
+              setNombreRelevo('Empleado no encontrado');
+            }
+          }
+        }}
         placeholder="Ingresa la cédula"
         placeholderTextColor="#475569"
         keyboardType="numeric"
         editable={!relevoActivo}
       />
-
       <Text style={s.label}>Nombre del empleado en relevo</Text>
       <View style={s.inputAuto}>
         <Text style={[s.inputAutoText, !nombreRelevo && s.placeholder]}>
           {nombreRelevo || 'Se completa automáticamente'}
         </Text>
       </View>
-
       {relevoActivo && (
         <View style={s.relevoActivoBadge}>
           <Text style={s.relevoActivoText}>Relevo activo desde {horaInicioRelevo}</Text>
         </View>
       )}
-
       <View style={s.fila}>
         <TouchableOpacity
           style={[s.btnRelevo, relevoActivo && s.btnDisabled]}
@@ -480,7 +481,6 @@ export default function Pantalla3() {
           <Text style={s.btnRelevoText}>Fin relevo</Text>
         </TouchableOpacity>
       </View>
-
       {historialRelevos.length > 0 && (
         <View style={s.listaRegistros}>
           <Text style={s.totalText}>Historial de relevos</Text>
@@ -509,13 +509,13 @@ export default function Pantalla3() {
           <Text style={s.modalTitulo}>Selecciona la parada</Text>
           <FlatList
             data={paradas}
-            keyExtractor={item => item.cod.toString()}
+            keyExtractor={item => item.id.toString()}
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={s.modalItem}
                 onPress={() => { setParadaSeleccionada(item); setModalParadas(false); }}
               >
-                <Text style={s.modalItemCod}>{item.cod}.</Text>
+                <Text style={s.modalItemCod}>{item.codigo}.</Text>
                 <Text style={s.modalItemText}>{item.descripcion}</Text>
               </TouchableOpacity>
             )}
@@ -532,14 +532,14 @@ export default function Pantalla3() {
           <Text style={s.modalTitulo}>Selecciona el defecto</Text>
           <FlatList
             data={desperdicios}
-            keyExtractor={item => item.cod.toString()}
+            keyExtractor={item => item.id.toString()}
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={s.modalItem}
                 onPress={() => { setDesperdSeleccionado(item); setModalDesperdicios(false); }}
               >
-                <Text style={s.modalItemCod}>{item.cod}.</Text>
-                <Text style={s.modalItemText}>{item.defecto}</Text>
+                <Text style={s.modalItemCod}>{item.codigo}.</Text>
+                <Text style={s.modalItemText}>{item.descripcion}</Text>
               </TouchableOpacity>
             )}
           />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ScrollView, Alert, ActivityIndicator
@@ -6,8 +6,14 @@ import {
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { obtenerOrdenGlobal } from '../store/useOrdenStore';
-import { EMPLEADOS } from '../constants/autocompletado';
-import { apiIniciarTurno, guardarTurnoId, obtenerOrdenId } from '../store/services/api';
+import {
+  apiIniciarTurno,
+  apiValidarEmpleado,
+  apiGetResumenTurno,
+  guardarTurnoId,
+  obtenerOrdenId,
+  obtenerTurnoId,
+} from '../store/services/api';
 
 const TURNOS = [
   '6:00 am - 6:00 pm',
@@ -42,22 +48,84 @@ export default function Pantalla2() {
   const [cargando, setCargando] = useState(false);
 
   const fechaHoy = new Date().toLocaleDateString('es-CO', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
+    day: '2-digit', month: '2-digit', year: 'numeric',
   });
-
-  // Fecha en formato YYYY-MM-DD para el servidor
   const fechaServidor = new Date().toISOString().split('T')[0];
 
+  // ── VERIFICAR TURNO ACTIVO AL MONTAR ─────────────────────
+  useEffect(() => {
+    const verificarTurnoActivo = async () => {
+      const turnoId = await obtenerTurnoId();
+      if (!turnoId) return;
+
+      try {
+        const resumen = await apiGetResumenTurno(turnoId);
+
+        if (resumen.hora_fin) {
+          // Turno ya cerrado — limpiar y dejar pantalla2 normal
+          await AsyncStorage.removeItem('turno_id');
+          await AsyncStorage.removeItem('turno_activo');
+          guardarTurnoGlobal(null);
+          return;
+        }
+
+        // Turno abierto — restaurar turnoGlobal si se perdió
+        if (!obtenerTurnoGlobal()) {
+          const turnoGuardado = await AsyncStorage.getItem('turno_activo');
+          if (turnoGuardado) guardarTurnoGlobal(JSON.parse(turnoGuardado));
+        }
+
+        // Preguntar al empleado
+        Alert.alert(
+          'Turno activo encontrado',
+          '¿Deseas continuar con el turno activo o iniciar uno nuevo?',
+          [
+            {
+              text: 'Continuar turno',
+              onPress: () => router.replace('/pantalla3'),
+            },
+            {
+              text: 'Nuevo turno',
+              style: 'destructive',
+              onPress: async () => {
+                await AsyncStorage.removeItem('turno_id');
+                await AsyncStorage.removeItem('turno_activo');
+                guardarTurnoGlobal(null);
+              },
+            },
+          ]
+        );
+      } catch {
+        // Si falla la consulta limpiar igual
+        await AsyncStorage.removeItem('turno_id');
+        await AsyncStorage.removeItem('turno_activo');
+        guardarTurnoGlobal(null);
+      }
+    };
+    verificarTurnoActivo();
+  }, []);
+
+  // ── CÉDULA DESDE API ──────────────────────────────────────
   const handleCedulaEmpleado = (valor: string) => {
     setCedulaEmpleado(valor);
-    setNombreEmpleado(EMPLEADOS[valor] || '');
+    setNombreEmpleado('');
   };
 
+  const buscarEmpleado = async () => {
+    if (cedulaEmpleado.length >= 5) {
+      try {
+        const resp = await apiValidarEmpleado(cedulaEmpleado);
+        setNombreEmpleado(resp.nombre);
+      } catch {
+        setNombreEmpleado('Empleado no encontrado');
+      }
+    }
+  };
+
+  // ── INICIAR TURNO ─────────────────────────────────────────
   const handleIniciarTurno = async () => {
-    if (!cedulaEmpleado || !nombreEmpleado) {
-      Alert.alert('Campos incompletos', 'Ingresa la cédula del empleado');
+    if (!cedulaEmpleado || !nombreEmpleado || nombreEmpleado === 'Empleado no encontrado') {
+      Alert.alert('Campos incompletos', 'Ingresa una cédula válida');
       return;
     }
     if (!turnoSeleccionado) {
@@ -67,8 +135,7 @@ export default function Pantalla2() {
 
     const ahora = new Date();
     const horaInicio = ahora.toLocaleTimeString('es-CO', {
-      hour: '2-digit',
-      minute: '2-digit',
+      hour: '2-digit', minute: '2-digit',
     });
 
     const datosTurno = {
@@ -82,7 +149,6 @@ export default function Pantalla2() {
     guardarTurnoGlobal(datosTurno);
     await AsyncStorage.setItem('turno_activo', JSON.stringify(datosTurno));
 
-    // Iniciar turno en el servidor
     setCargando(true);
     try {
       const ordenId = await obtenerOrdenId();
@@ -122,6 +188,7 @@ export default function Pantalla2() {
         style={st.input}
         value={cedulaEmpleado}
         onChangeText={handleCedulaEmpleado}
+        onBlur={buscarEmpleado}
         placeholder="Ingresa la cédula"
         placeholderTextColor="#475569"
         keyboardType="numeric"
@@ -129,7 +196,11 @@ export default function Pantalla2() {
 
       <Text style={st.label}>Nombre del empleado</Text>
       <View style={st.inputAuto}>
-        <Text style={[st.inputAutoText, !nombreEmpleado && st.placeholder]}>
+        <Text style={[
+          st.inputAutoText,
+          !nombreEmpleado && st.placeholder,
+          nombreEmpleado === 'Empleado no encontrado' && st.inputAutoError
+        ]}>
           {nombreEmpleado || 'Se completa automáticamente'}
         </Text>
       </View>
@@ -155,7 +226,11 @@ export default function Pantalla2() {
         </TouchableOpacity>
       ))}
 
-      <TouchableOpacity style={[st.btn, cargando && st.btnDisabled]} onPress={handleIniciarTurno} disabled={cargando}>
+      <TouchableOpacity
+        style={[st.btn, cargando && st.btnDisabled]}
+        onPress={handleIniciarTurno}
+        disabled={cargando}
+      >
         {cargando
           ? <ActivityIndicator color="#fff" />
           : <Text style={st.btnText}>Iniciar turno →</Text>
@@ -181,6 +256,7 @@ const st = StyleSheet.create({
   inputAuto:       { backgroundColor: '#0f2744', borderRadius: 10, padding: 14,
                      marginBottom: 14, borderWidth: 1, borderColor: '#1e3a5f' },
   inputAutoText:   { fontSize: 15, color: '#6366f1' },
+  inputAutoError:  { color: '#ef4444' },
   placeholder:     { color: '#334155' },
   turnoCard:       { flexDirection: 'row', alignItems: 'center', gap: 12,
                      backgroundColor: '#1e293b', borderRadius: 10, padding: 16,

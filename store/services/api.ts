@@ -1,13 +1,11 @@
 /**
  * services/api.ts
  * Capa de comunicación con el servidor FastAPI
- * Cambia API_URL por la IP de tu PC en la red local
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ─── CONFIGURACIÓN ───────────────────────────────────────────
-// Cambia esta IP por la de tu PC (ejecuta ipconfig en Windows)
 export const API_URL = 'http://192.168.1.8:8000';
 
 // ─── HELPER BASE ─────────────────────────────────────────────
@@ -52,6 +50,22 @@ export interface RegistroProduccionResp {
   turno_id: number;
   hora: string;
   cantidad: number;
+}
+
+export interface CausaParadaAPI {
+  id: number;
+  codigo: number;
+  descripcion: string;
+  programada: boolean;
+  tipo_maquina: string;
+  activa: boolean;
+}
+
+export interface TipoDesperdicioAPI {
+  id: number;
+  codigo: number;
+  descripcion: string;
+  activa: boolean;
 }
 
 // ─── AUTH ────────────────────────────────────────────────────
@@ -102,9 +116,7 @@ export const apiCerrarTurno = (turno_id: number, hora_fin: string) =>
 
 export const apiAgregarProduccion = (turno_id: number, hora: string, cantidad: number) =>
   request<RegistroProduccionResp>('/produccion/registro', 'POST', {
-    turno_id,
-    hora,
-    cantidad,
+    turno_id, hora, cantidad,
   });
 
 // ─── PARADAS ─────────────────────────────────────────────────
@@ -136,10 +148,9 @@ export const apiIniciarRelevo = (datos: {
 }) => request<{ id: number }>('/produccion/relevo', 'POST', datos);
 
 export const apiCerrarRelevo = (relevo_id: number, hora_fin: string) =>
-  request(`/produccion/relevo/${relevo_id}/cerrar`, 'PATCH', { hora_fin });
+  request(`/produccion/relevo/${relevo_id}/cerrar?hora_fin=${hora_fin}`, 'PATCH');
 
 // ─── STORAGE HELPERS ─────────────────────────────────────────
-// Guardan orden_id y turno_id en AsyncStorage para persistencia
 
 export const guardarOrdenId = (id: number) =>
   AsyncStorage.setItem('orden_id', id.toString());
@@ -159,3 +170,16 @@ export const obtenerTurnoId = async (): Promise<number | null> => {
 
 export const limpiarIds = () =>
   AsyncStorage.multiRemove(['orden_id', 'turno_id']);
+
+// ─── CATÁLOGOS ───────────────────────────────────────────────
+
+export const apiGetCausasParada = (tipo_maquina: string) =>
+  request<CausaParadaAPI[]>(
+    `/catalogos/causas-parada?tipo_maquina=${tipo_maquina}&solo_activas=true`
+  );
+
+export const apiGetTiposDesperdicio = () =>
+  request<TipoDesperdicioAPI[]>('/catalogos/tipos-desperdicio?solo_activas=true');
+
+export const apiGetResumenTurno = (turno_id: number) =>
+  request<{ hora_fin: string | null }>(`/produccion/turno/${turno_id}/resumen`);
