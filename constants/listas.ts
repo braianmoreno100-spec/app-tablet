@@ -1,4 +1,4 @@
-export type TipoMaquina = 'inyeccion' | 'soplado' | 'linea';
+export type TipoMaquina = 'inyeccion' | 'soplado' | 'linea' | 'acondicionamiento';
 
 export interface Parada {
   cod: number;
@@ -146,6 +146,63 @@ export const PARADAS_LINEA: Parada[] = [
   { cod: 42, descripcion: 'AJUSTE MECANICO DE PROCESO', programada: false },
 ];
 
+// ─── Acondicionamiento 2025 ───────────────────────────────────────────────────
+// programada: true  → no programada (falla)
+// programada: false → programada (actividad planeada)
+export const PARADAS_ACONDICIONAMIENTO: Parada[] = [
+  { cod: 1,  descripcion: 'FALLA PLANTA ELECTRICA',                   programada: true },
+  { cod: 2,  descripcion: 'FALLO EN TIJERAS',                          programada: true },
+  { cod: 3,  descripcion: 'FALLA AGARRE ELASTICO',                     programada: true },
+  { cod: 4,  descripcion: 'FALLA DE SENSORES',                         programada: true },
+  { cod: 5,  descripcion: 'FALLA CORTE TAPABOCAS',                     programada: true },
+  { cod: 6,  descripcion: 'FALLA SOLDADURA DE CAUCHO',                 programada: true },
+  { cod: 7,  descripcion: 'FALLA SOLDADURA MAQUINA MANUAL',            programada: true },
+  { cod: 8,  descripcion: 'FALLA DE SELLADORAS',                       programada: true },
+  { cod: 9,  descripcion: 'FALLA DE MAQUINA CODIFICADORA',             programada: true },
+  { cod: 10, descripcion: 'ESPERA DE MANTENIMIENTO',                   programada: true },
+  { cod: 11, descripcion: 'TEC. MTTO. OCUPADO',                        programada: true },
+  { cod: 12, descripcion: 'MANTENIMIENTO CORRECTIVO',                  programada: true },
+  { cod: 13, descripcion: 'FALLA AIRE COMPRIMIDO',                     programada: true },
+  { cod: 14, descripcion: 'PICO DE ENERGIA',                           programada: true },
+  { cod: 15, descripcion: 'FALTA DE OPERARIO',                         programada: true },
+  { cod: 16, descripcion: 'CORTE ENERGIA EXTERIOR',                    programada: true },
+  { cod: 17, descripcion: 'FALTA DE MATERIAL EXTERNO',                 programada: true },
+  { cod: 18, descripcion: 'TERMINA ORDEN',                             programada: true },
+  { cod: 19, descripcion: 'LIMPIEZA Y DESINFECCION',                   programada: true },
+  { cod: 20, descripcion: 'DESAYUNO, ALMUERZO, CENA',                  programada: true },
+  { cod: 21, descripcion: 'MANTENIMIENTO PREVENTIVO',                  programada: true },
+  { cod: 22, descripcion: 'REUNION',                                   programada: true },
+  { cod: 23, descripcion: 'PAUSAS ACTIVAS',                            programada: true },
+  { cod: 24, descripcion: 'MANTENIMIENTO PLANTA ELECTRICA',            programada: true },
+  { cod: 25, descripcion: 'RELEVOS',                                   programada: true },
+  { cod: 26, descripcion: 'LIMPIEZA DE MAQUINA CODIFICADORA',          programada: true },
+  { cod: 27, descripcion: 'CAUCHO EN MAL ESTADO',                      programada: true },
+  { cod: 28, descripcion: 'FALLA ALAMBRE',                             programada: true },
+  { cod: 29, descripcion: 'CAMBIO DE ROLLO',                           programada: true },
+  { cod: 30, descripcion: 'FALTA DE MATERIAL INTERNO',                 programada: true },
+  { cod: 31, descripcion: 'ESTUCHE PEGADO',                            programada: true },
+  { cod: 32, descripcion: 'MASCARA SIN VALVULA',                       programada: true },
+  { cod: 33, descripcion: 'TUBO SIN TAPA INFERIOR',                    programada: true },
+  { cod: 34, descripcion: 'EXCESO DE REBABA EN TUBO',                  programada: true },
+  { cod: 35, descripcion: 'BOLSA PEGADA',                              programada: true },
+  { cod: 36, descripcion: 'SELECCION DE EMPAQUE',                      programada: true },
+  { cod: 37, descripcion: 'CONTEO DE PRODUCTO',                        programada: true },
+  { cod: 38, descripcion: 'ROLLO MAL BOBINADO',                        programada: true },
+  { cod: 39, descripcion: 'MAQUINA INESTABLE',                         programada: true },
+  { cod: 40, descripcion: 'PARO MAQUINA C. CALIDAD',                   programada: true },
+  { cod: 41, descripcion: 'AJUSTE PROCESO',                            programada: true },
+  { cod: 42, descripcion: 'OPERARIO EN OTRA ACTIVIDAD',                programada: true },
+  // ── Programadas ────────────────────────────────────────────────────────────
+  { cod: 43, descripcion: 'ORIFICIOS A EMPAQUE',                       programada: false },
+  { cod: 44, descripcion: 'INFORMACION PARA CODIFICAR EN EL DESPEJE',  programada: false },
+  { cod: 45, descripcion: 'CODIFICAR EMPAQUE',                         programada: false },
+  { cod: 46, descripcion: 'RECIBIR MATERIAL DE BODEGA',                programada: false },
+  { cod: 47, descripcion: 'BORRAR EMPAQUE',                            programada: false },
+  { cod: 48, descripcion: 'INICIO DE ORDEN',                           programada: false },
+  { cod: 49, descripcion: 'PEGAR STICKER',                             programada: false },
+  { cod: 50, descripcion: 'ALISTAMIENTO DE PRODUCTO',                  programada: false },
+];
+
 export const DESPERDICIOS_INYECCION_SOPLADO: Desperdicio[] = [
   { cod: 1,  defecto: 'REBABAS' },
   { cod: 2,  defecto: 'LLENADO INCOMPLETO' },
@@ -197,18 +254,42 @@ export const DESPERDICIOS_LINEA: Desperdicio[] = [
   { cod: 22, defecto: 'FRASCO OVALADO' },
 ];
 
+export const DESPERDICIOS_ACONDICIONAMIENTO: Desperdicio[] = [
+  { cod: 25, defecto: 'DEFECTOS' },
+  { cod: 26, defecto: 'LLENADO INCOMPLETO ACOND' },
+  { cod: 27, defecto: 'QUEMADAS' },
+  { cod: 28, defecto: 'BURBUJAS ACOND' },
+  { cod: 29, defecto: 'GRIETAS ACOND' },
+  { cod: 30, defecto: 'RECHUPES ACOND' },
+  { cod: 31, defecto: 'CONTAMINACION ACOND' },
+  { cod: 32, defecto: 'PIEZA CON GRASA ACOND' },
+  { cod: 33, defecto: 'OXIDO ACOND' },
+  { cod: 34, defecto: 'PIEZAS DEFORMES' },
+  { cod: 35, defecto: 'FALTA DE CAUCHO' },
+  { cod: 36, defecto: 'CAUCHO SUCIO' },
+  { cod: 37, defecto: 'MAL PEGUE' },
+  { cod: 38, defecto: 'EMPAQUE DEFECTUOSO' },
+  { cod: 39, defecto: 'DISPOSITIVO DEFECTUOSO' },
+  { cod: 40, defecto: 'VENCIDOS' },
+  { cod: 41, defecto: 'DAÑO DE EMPAQUE AL CODIFICAR' },
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 export function getParadas(tipo: TipoMaquina): Parada[] {
   switch (tipo) {
-    case 'inyeccion': return PARADAS_INYECCION;
-    case 'soplado':   return PARADAS_SOPLADO;
-    case 'linea':     return PARADAS_LINEA;
+    case 'inyeccion':         return PARADAS_INYECCION;
+    case 'soplado':           return PARADAS_SOPLADO;
+    case 'linea':             return PARADAS_LINEA;
+    case 'acondicionamiento': return PARADAS_ACONDICIONAMIENTO;
   }
 }
 
 export function getDesperdicios(tipo: TipoMaquina): Desperdicio[] {
   switch (tipo) {
     case 'inyeccion':
-    case 'soplado':   return DESPERDICIOS_INYECCION_SOPLADO;
-    case 'linea':     return DESPERDICIOS_LINEA;
+    case 'soplado':           return DESPERDICIOS_INYECCION_SOPLADO;
+    case 'linea':             return DESPERDICIOS_LINEA;
+    case 'acondicionamiento': return DESPERDICIOS_ACONDICIONAMIENTO;
   }
 }

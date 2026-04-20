@@ -9,30 +9,42 @@ import { LIDERES, PRODUCTOS } from '../constants/autocompletado';
 import { TipoMaquina } from '../constants/listas';
 import { apiCrearOrden, guardarOrdenId } from '../store/services/api';
 
+// ─── Tipos de máquina disponibles ────────────────────────────────────────────
 const TIPOS_MAQUINA: { label: string; value: TipoMaquina }[] = [
-  { label: 'Inyección', value: 'inyeccion' },
-  { label: 'Soplado', value: 'soplado' },
-  { label: 'Línea de empaque', value: 'linea' },
+  { label: 'Inyección',          value: 'inyeccion'         },
+  { label: 'Soplado',            value: 'soplado'           },
+  { label: 'Línea de empaque',   value: 'linea'             },
+  { label: 'Acondicionamiento',  value: 'acondicionamiento' },
 ];
+
+// Máquinas disponibles por tipo (null = ingreso libre de texto)
+const MAQUINAS_POR_TIPO: Record<TipoMaquina, number[] | null> = {
+  inyeccion:         [1, 2, 3, 4, 5, 6],
+  soplado:           null,
+  linea:             null,
+  acondicionamiento: [1, 2],
+};
 
 export default function Pantalla1() {
   const router = useRouter();
 
-  const [cedulaLider, setCedulaLider] = useState('');
-  const [nombreLider, setNombreLider] = useState('');
-  const [numeroOrden, setNumeroOrden] = useState('');
-  const [codigoProducto, setCodigoProducto] = useState('');
+  const [cedulaLider,         setCedulaLider]         = useState('');
+  const [nombreLider,         setNombreLider]         = useState('');
+  const [numeroOrden,         setNumeroOrden]         = useState('');
+  const [codigoProducto,      setCodigoProducto]      = useState('');
   const [descripcionProducto, setDescripcionProducto] = useState('');
-  const [cantidadProducir, setCantidadProducir] = useState('');
-  const [material, setMaterial] = useState('');
-  const [tipoMaquina, setTipoMaquina] = useState<TipoMaquina | null>(null);
-  const [numeroMaquina, setNumeroMaquina] = useState('');
-  const [cavidades, setCavidades] = useState('');
-  const [ciclos, setCiclos] = useState('');
-  const [tienePigmento, setTienePigmento] = useState(false);
-  const [numeroPigmento, setNumeroPigmento] = useState('');
+  const [cantidadProducir,    setCantidadProducir]    = useState('');
+  const [material,            setMaterial]            = useState('');
+  const [tipoMaquina,         setTipoMaquina]         = useState<TipoMaquina | null>(null);
+  const [numeroMaquina,       setNumeroMaquina]       = useState('');
+  const [cavidades,           setCavidades]           = useState('');
+  const [ciclos,              setCiclos]              = useState('');
+  const [tienePigmento,       setTienePigmento]       = useState(false);
+  const [numeroPigmento,      setNumeroPigmento]      = useState('');
   const [descripcionPigmento, setDescripcionPigmento] = useState('');
-  const [cargando, setCargando] = useState(false);
+  const [cargando,            setCargando]            = useState(false);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
   const handleCedulaLider = (valor: string) => {
     setCedulaLider(valor);
@@ -56,6 +68,11 @@ export default function Pantalla1() {
     }
   };
 
+  const handleTipoMaquina = (tipo: TipoMaquina) => {
+    setTipoMaquina(tipo);
+    setNumeroMaquina(''); // reset al cambiar tipo
+  };
+
   const handleGuardar = async () => {
     if (!cedulaLider || !nombreLider || !numeroOrden || !codigoProducto || !numeroMaquina) {
       Alert.alert('Campos incompletos', 'Por favor completa todos los campos obligatorios');
@@ -77,12 +94,12 @@ export default function Pantalla1() {
       numeroOrden,
       codigoProducto,
       descripcionProducto,
-      cantidadProducir: Number(cantidadProducir),
+      cantidadProducir:    Number(cantidadProducir),
       material,
       tipoMaquina,
       numeroMaquina,
-      cavidades: Number(cavidades),
-      ciclos: Number(ciclos),
+      cavidades:           Number(cavidades),
+      ciclos:              Number(ciclos),
       tienePigmento,
       numeroPigmento,
       descripcionPigmento,
@@ -92,20 +109,20 @@ export default function Pantalla1() {
     setCargando(true);
     try {
       const ordenCreada = await apiCrearOrden({
-        numero_orden: numeroOrden,
-        codigo_producto: codigoProducto,
-        descripcion_producto: descripcionProducto,
-        cantidad_producir: Number(cantidadProducir),
+        numero_orden:          numeroOrden,
+        codigo_producto:       codigoProducto,
+        descripcion_producto:  descripcionProducto,
+        cantidad_producir:     Number(cantidadProducir),
         material,
-        tipo_maquina: tipoMaquina,
-        numero_maquina: numeroMaquina,
-        cavidades: Number(cavidades),
-        ciclos: Number(ciclos),
-        tiene_pigmento: tienePigmento,
-        numero_pigmento: numeroPigmento,
-        descripcion_pigmento: descripcionPigmento,
-        cedula_lider: cedulaLider,
-        nombre_lider: nombreLider,
+        tipo_maquina:          tipoMaquina,
+        numero_maquina:        numeroMaquina,
+        cavidades:             Number(cavidades),
+        ciclos:                Number(ciclos),
+        tiene_pigmento:        tienePigmento,
+        numero_pigmento:       numeroPigmento,
+        descripcion_pigmento:  descripcionPigmento,
+        cedula_lider:          cedulaLider,
+        nombre_lider:          nombreLider,
       });
 
       await guardarOrdenId(ordenCreada.id);
@@ -117,12 +134,64 @@ export default function Pantalla1() {
     }
   };
 
+  // ── Sublista de número de máquina ─────────────────────────────────────────
+  const opcionesMaquina = tipoMaquina ? MAQUINAS_POR_TIPO[tipoMaquina] : null;
+
+  const renderSelectorNumeroMaquina = () => {
+    if (!tipoMaquina) return null;
+
+    if (opcionesMaquina) {
+      // Selector por botones (inyección: 1-6, acondicionamiento: 1-2)
+      return (
+        <>
+          <Text style={s.label}>Número de máquina</Text>
+          <View style={s.botonesNumero}>
+            {opcionesMaquina.map((num) => (
+              <TouchableOpacity
+                key={num}
+                style={[
+                  s.botonNumero,
+                  numeroMaquina === String(num) && s.botonNumeroActivo,
+                ]}
+                onPress={() => setNumeroMaquina(String(num))}
+              >
+                <Text style={[
+                  s.botonNumeroText,
+                  numeroMaquina === String(num) && s.botonNumeroTextActivo,
+                ]}>
+                  {num}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      );
+    }
+
+    // Input libre (soplado, línea)
+    return (
+      <>
+        <Text style={s.label}>Número de máquina</Text>
+        <TextInput
+          style={s.input}
+          value={numeroMaquina}
+          onChangeText={setNumeroMaquina}
+          placeholder="Ingresa el número de máquina"
+          placeholderTextColor="#475569"
+          keyboardType="numeric"
+        />
+      </>
+    );
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
 
       <Text style={s.titulo}>Datos de la orden</Text>
       <Text style={s.subtitulo}>Ingreso del líder de producción</Text>
 
+      {/* ── Datos del líder ─────────────────────────────────────── */}
       <Text style={s.seccion}>Datos del líder</Text>
 
       <Text style={s.label}>Cédula del líder</Text>
@@ -142,6 +211,7 @@ export default function Pantalla1() {
         </Text>
       </View>
 
+      {/* ── Datos de la orden ──────────────────────────────────── */}
       <Text style={s.seccion}>Datos de la orden</Text>
 
       <Text style={s.label}>Número de orden</Text>
@@ -198,6 +268,7 @@ export default function Pantalla1() {
         </View>
       </View>
 
+      {/* ── Máquina ─────────────────────────────────────────────── */}
       <Text style={s.seccion}>Máquina</Text>
 
       <Text style={s.label}>Tipo de máquina</Text>
@@ -205,7 +276,7 @@ export default function Pantalla1() {
         <TouchableOpacity
           key={tipo.value}
           style={[s.turnoCard, tipoMaquina === tipo.value && s.turnoActivo]}
-          onPress={() => setTipoMaquina(tipo.value)}
+          onPress={() => handleTipoMaquina(tipo.value)}
         >
           <View style={[s.radio, tipoMaquina === tipo.value && s.radioActivo]} />
           <Text style={[s.turnoText, tipoMaquina === tipo.value && s.turnoTextActivo]}>
@@ -214,15 +285,8 @@ export default function Pantalla1() {
         </TouchableOpacity>
       ))}
 
-      <Text style={s.label}>Número de máquina</Text>
-      <TextInput
-        style={s.input}
-        value={numeroMaquina}
-        onChangeText={setNumeroMaquina}
-        placeholder="Ingresa el número de máquina"
-        placeholderTextColor="#475569"
-        keyboardType="numeric"
-      />
+      {/* Número de máquina — botones o input según tipo */}
+      {renderSelectorNumeroMaquina()}
 
       <View style={s.fila}>
         <View style={s.mitad}>
@@ -243,6 +307,7 @@ export default function Pantalla1() {
         </View>
       </View>
 
+      {/* ── Pigmento ─────────────────────────────────────────────── */}
       <Text style={s.seccion}>Pigmento</Text>
 
       <View style={s.toggleFila}>
@@ -277,7 +342,11 @@ export default function Pantalla1() {
         </View>
       )}
 
-      <TouchableOpacity style={[s.btn, cargando && s.btnDisabled]} onPress={handleGuardar} disabled={cargando}>
+      <TouchableOpacity
+        style={[s.btn, cargando && s.btnDisabled]}
+        onPress={handleGuardar}
+        disabled={cargando}
+      >
         {cargando
           ? <ActivityIndicator color="#fff" />
           : <Text style={s.btnText}>Guardar orden y continuar →</Text>
@@ -289,40 +358,49 @@ export default function Pantalla1() {
 }
 
 const s = StyleSheet.create({
-  container:          { flex: 1, backgroundColor: '#0f172a' },
-  content:            { padding: 24, paddingTop: 60, paddingBottom: 40 },
-  titulo:             { fontSize: 24, fontWeight: '700', color: '#f1f5f9', marginBottom: 4 },
-  subtitulo:          { fontSize: 14, color: '#94a3b8', marginBottom: 24 },
-  seccion:            { fontSize: 13, fontWeight: '600', color: '#6366f1',
-                        textTransform: 'uppercase', letterSpacing: 1,
-                        marginTop: 24, marginBottom: 12 },
-  label:              { fontSize: 13, color: '#94a3b8', marginBottom: 6 },
-  input:              { backgroundColor: '#1e293b', borderRadius: 10, padding: 14,
-                        fontSize: 15, color: '#f1f5f9', marginBottom: 14,
-                        borderWidth: 1, borderColor: '#334155' },
-  inputAuto:          { backgroundColor: '#0f2744', borderRadius: 10, padding: 14,
-                        marginBottom: 14, borderWidth: 1, borderColor: '#1e3a5f' },
-  inputAutoText:      { fontSize: 15, color: '#6366f1' },
-  placeholder:        { color: '#334155' },
-  fila:               { flexDirection: 'row', gap: 12 },
-  mitad:              { flex: 1 },
-  turnoCard:          { flexDirection: 'row', alignItems: 'center', gap: 12,
-                        backgroundColor: '#1e293b', borderRadius: 10, padding: 16,
-                        marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
-  turnoActivo:        { borderColor: '#6366f1', backgroundColor: '#1e1b4b' },
-  radio:              { width: 20, height: 20, borderRadius: 10,
-                        borderWidth: 2, borderColor: '#475569' },
-  radioActivo:        { borderColor: '#6366f1', backgroundColor: '#6366f1' },
-  turnoText:          { fontSize: 15, color: '#94a3b8' },
-  turnoTextActivo:    { color: '#f1f5f9', fontWeight: '600' },
-  toggleFila:         { flexDirection: 'row', justifyContent: 'space-between',
-                        alignItems: 'center', backgroundColor: '#1e293b',
-                        borderRadius: 10, padding: 16, marginBottom: 14,
-                        borderWidth: 1, borderColor: '#334155' },
-  toggleLabel:        { fontSize: 15, color: '#f1f5f9' },
-  btn:                { backgroundColor: '#6366f1', borderRadius: 14,
-                        padding: 18, alignItems: 'center', marginTop: 16 },
-  btnDisabled:        { opacity: 0.6 },
-  btnText:            { color: '#fff', fontSize: 17, fontWeight: '700' },
-  cantidadFormateada: { fontSize: 13, color: '#6366f1', marginTop: -10, marginBottom: 14 },
+  container:           { flex: 1, backgroundColor: '#0f172a' },
+  content:             { padding: 24, paddingTop: 60, paddingBottom: 40 },
+  titulo:              { fontSize: 24, fontWeight: '700', color: '#f1f5f9', marginBottom: 4 },
+  subtitulo:           { fontSize: 14, color: '#94a3b8', marginBottom: 24 },
+  seccion:             { fontSize: 13, fontWeight: '600', color: '#6366f1',
+                         textTransform: 'uppercase', letterSpacing: 1,
+                         marginTop: 24, marginBottom: 12 },
+  label:               { fontSize: 13, color: '#94a3b8', marginBottom: 6 },
+  input:               { backgroundColor: '#1e293b', borderRadius: 10, padding: 14,
+                         fontSize: 15, color: '#f1f5f9', marginBottom: 14,
+                         borderWidth: 1, borderColor: '#334155' },
+  inputAuto:           { backgroundColor: '#0f2744', borderRadius: 10, padding: 14,
+                         marginBottom: 14, borderWidth: 1, borderColor: '#1e3a5f' },
+  inputAutoText:       { fontSize: 15, color: '#6366f1' },
+  placeholder:         { color: '#334155' },
+  fila:                { flexDirection: 'row', gap: 12 },
+  mitad:               { flex: 1 },
+  turnoCard:           { flexDirection: 'row', alignItems: 'center', gap: 12,
+                         backgroundColor: '#1e293b', borderRadius: 10, padding: 16,
+                         marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
+  turnoActivo:         { borderColor: '#6366f1', backgroundColor: '#1e1b4b' },
+  radio:               { width: 20, height: 20, borderRadius: 10,
+                         borderWidth: 2, borderColor: '#475569' },
+  radioActivo:         { borderColor: '#6366f1', backgroundColor: '#6366f1' },
+  turnoText:           { fontSize: 15, color: '#94a3b8' },
+  turnoTextActivo:     { color: '#f1f5f9', fontWeight: '600' },
+  // ── Botones de número de máquina ──────────────────────────────
+  botonesNumero:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
+  botonNumero:         { width: 56, height: 56, borderRadius: 10,
+                         backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155',
+                         alignItems: 'center', justifyContent: 'center' },
+  botonNumeroActivo:   { backgroundColor: '#1e1b4b', borderColor: '#6366f1' },
+  botonNumeroText:     { fontSize: 20, fontWeight: '600', color: '#475569' },
+  botonNumeroTextActivo: { color: '#a5b4fc' },
+  // ─────────────────────────────────────────────────────────────
+  toggleFila:          { flexDirection: 'row', justifyContent: 'space-between',
+                         alignItems: 'center', backgroundColor: '#1e293b',
+                         borderRadius: 10, padding: 16, marginBottom: 14,
+                         borderWidth: 1, borderColor: '#334155' },
+  toggleLabel:         { fontSize: 15, color: '#f1f5f9' },
+  btn:                 { backgroundColor: '#6366f1', borderRadius: 14,
+                         padding: 18, alignItems: 'center', marginTop: 16 },
+  btnDisabled:         { opacity: 0.6 },
+  btnText:             { color: '#fff', fontSize: 17, fontWeight: '700' },
+  cantidadFormateada:  { fontSize: 13, color: '#6366f1', marginTop: -10, marginBottom: 14 },
 });

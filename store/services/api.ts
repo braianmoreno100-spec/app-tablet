@@ -6,7 +6,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ─── CONFIGURACIÓN ───────────────────────────────────────────
-export const API_URL = 'http://192.168.1.8:8000';
+export const API_URL = 'http://192.168.1.6:8000';
 
 // ─── HELPER BASE ─────────────────────────────────────────────
 async function request<T>(
