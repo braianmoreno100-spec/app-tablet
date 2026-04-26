@@ -19,10 +19,18 @@ const TIPOS_MAQUINA: { label: string; value: TipoMaquina }[] = [
 
 // Máquinas disponibles por tipo (null = ingreso libre de texto)
 const MAQUINAS_POR_TIPO: Record<TipoMaquina, number[] | null> = {
-  inyeccion:         [1, 2, 3, 4, 5, 6],
-  soplado:           null,
-  linea:             null,
+  inyeccion:         [1, 2, 3, 4, 5, 6, 7],
+  soplado:           [1],
+  linea:             [1, 2],   // 1 = Coprológico, 2 = Orina
   acondicionamiento: [1, 2],
+};
+
+// Etiquetas especiales para botones de número de máquina
+const ETIQUETAS_MAQUINA: Partial<Record<TipoMaquina, Record<number, string>>> = {
+  linea: {
+    1: 'Copro',
+    2: 'Orina',
+  },
 };
 
 export default function Pantalla1() {
@@ -43,6 +51,7 @@ export default function Pantalla1() {
   const [numeroPigmento,      setNumeroPigmento]      = useState('');
   const [descripcionPigmento, setDescripcionPigmento] = useState('');
   const [cargando,            setCargando]            = useState(false);
+
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -87,7 +96,6 @@ export default function Pantalla1() {
       return;
     }
 
-    // Guardar en estado global local
     guardarOrdenGlobal({
       cedulaLider,
       nombreLider,
@@ -105,7 +113,6 @@ export default function Pantalla1() {
       descripcionPigmento,
     });
 
-    // Crear orden en el servidor
     setCargando(true);
     try {
       const ordenCreada = await apiCrearOrden({
@@ -123,6 +130,8 @@ export default function Pantalla1() {
         descripcion_pigmento:  descripcionPigmento,
         cedula_lider:          cedulaLider,
         nombre_lider:          nombreLider,
+        
+        
       });
 
       await guardarOrdenId(ordenCreada.id);
@@ -139,36 +148,53 @@ export default function Pantalla1() {
 
   const renderSelectorNumeroMaquina = () => {
     if (!tipoMaquina) return null;
+{renderSelectorNumeroMaquina()}
 
     if (opcionesMaquina) {
-      // Selector por botones (inyección: 1-6, acondicionamiento: 1-2)
+      const etiquetas = tipoMaquina ? ETIQUETAS_MAQUINA[tipoMaquina] : undefined;
+
       return (
         <>
-          <Text style={s.label}>Número de máquina</Text>
+          <Text style={s.label}>
+            {tipoMaquina === 'linea' ? 'Línea de empaque' : 'Número de máquina'}
+          </Text>
           <View style={s.botonesNumero}>
-            {opcionesMaquina.map((num) => (
-              <TouchableOpacity
-                key={num}
-                style={[
-                  s.botonNumero,
-                  numeroMaquina === String(num) && s.botonNumeroActivo,
-                ]}
-                onPress={() => setNumeroMaquina(String(num))}
-              >
-                <Text style={[
-                  s.botonNumeroText,
-                  numeroMaquina === String(num) && s.botonNumeroTextActivo,
-                ]}>
-                  {num}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {opcionesMaquina.map((num) => {
+              const etiqueta = etiquetas?.[num] ?? String(num);
+              const activo   = numeroMaquina === String(num);
+              return (
+                <TouchableOpacity
+                  key={num}
+                  style={[
+                    s.botonNumero,
+                    // botones más anchos para línea (tienen texto más largo)
+                    tipoMaquina === 'linea' && s.botonNumeroLinea,
+                    activo && s.botonNumeroActivo,
+                  ]}
+                  onPress={() => setNumeroMaquina(String(num))}
+                >
+                  <Text style={[
+                    s.botonNumeroText,
+                    tipoMaquina === 'linea' && s.botonNumeroTextLinea,
+                    activo && s.botonNumeroTextActivo,
+                  ]}>
+                    {etiqueta}
+                  </Text>
+                  {/* Subetiqueta con el número real para línea */}
+                  {tipoMaquina === 'linea' && (
+                    <Text style={[s.botonNumeroSub, activo && s.botonNumeroSubActivo]}>
+                      Línea {num}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </>
       );
     }
 
-    // Input libre (soplado, línea)
+    // Input libre (soplado)
     return (
       <>
         <Text style={s.label}>Número de máquina</Text>
@@ -285,7 +311,6 @@ export default function Pantalla1() {
         </TouchableOpacity>
       ))}
 
-      {/* Número de máquina — botones o input según tipo */}
       {renderSelectorNumeroMaquina()}
 
       <View style={s.fila}>
@@ -358,49 +383,55 @@ export default function Pantalla1() {
 }
 
 const s = StyleSheet.create({
-  container:           { flex: 1, backgroundColor: '#0f172a' },
-  content:             { padding: 24, paddingTop: 60, paddingBottom: 40 },
-  titulo:              { fontSize: 24, fontWeight: '700', color: '#f1f5f9', marginBottom: 4 },
-  subtitulo:           { fontSize: 14, color: '#94a3b8', marginBottom: 24 },
-  seccion:             { fontSize: 13, fontWeight: '600', color: '#6366f1',
-                         textTransform: 'uppercase', letterSpacing: 1,
-                         marginTop: 24, marginBottom: 12 },
-  label:               { fontSize: 13, color: '#94a3b8', marginBottom: 6 },
-  input:               { backgroundColor: '#1e293b', borderRadius: 10, padding: 14,
-                         fontSize: 15, color: '#f1f5f9', marginBottom: 14,
-                         borderWidth: 1, borderColor: '#334155' },
-  inputAuto:           { backgroundColor: '#0f2744', borderRadius: 10, padding: 14,
-                         marginBottom: 14, borderWidth: 1, borderColor: '#1e3a5f' },
-  inputAutoText:       { fontSize: 15, color: '#6366f1' },
-  placeholder:         { color: '#334155' },
-  fila:                { flexDirection: 'row', gap: 12 },
-  mitad:               { flex: 1 },
-  turnoCard:           { flexDirection: 'row', alignItems: 'center', gap: 12,
-                         backgroundColor: '#1e293b', borderRadius: 10, padding: 16,
-                         marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
-  turnoActivo:         { borderColor: '#6366f1', backgroundColor: '#1e1b4b' },
-  radio:               { width: 20, height: 20, borderRadius: 10,
-                         borderWidth: 2, borderColor: '#475569' },
-  radioActivo:         { borderColor: '#6366f1', backgroundColor: '#6366f1' },
-  turnoText:           { fontSize: 15, color: '#94a3b8' },
-  turnoTextActivo:     { color: '#f1f5f9', fontWeight: '600' },
-  // ── Botones de número de máquina ──────────────────────────────
-  botonesNumero:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
-  botonNumero:         { width: 56, height: 56, borderRadius: 10,
-                         backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155',
-                         alignItems: 'center', justifyContent: 'center' },
-  botonNumeroActivo:   { backgroundColor: '#1e1b4b', borderColor: '#6366f1' },
-  botonNumeroText:     { fontSize: 20, fontWeight: '600', color: '#475569' },
+  container:             { flex: 1, backgroundColor: '#0f172a' },
+  content:               { padding: 24, paddingTop: 60, paddingBottom: 40 },
+  titulo:                { fontSize: 24, fontWeight: '700', color: '#f1f5f9', marginBottom: 4 },
+  subtitulo:             { fontSize: 14, color: '#94a3b8', marginBottom: 24 },
+  seccion:               { fontSize: 13, fontWeight: '600', color: '#6366f1',
+                           textTransform: 'uppercase', letterSpacing: 1,
+                           marginTop: 24, marginBottom: 12 },
+  label:                 { fontSize: 13, color: '#94a3b8', marginBottom: 6 },
+  input:                 { backgroundColor: '#1e293b', borderRadius: 10, padding: 14,
+                           fontSize: 15, color: '#f1f5f9', marginBottom: 14,
+                           borderWidth: 1, borderColor: '#334155' },
+  inputAuto:             { backgroundColor: '#0f2744', borderRadius: 10, padding: 14,
+                           marginBottom: 14, borderWidth: 1, borderColor: '#1e3a5f' },
+  inputAutoText:         { fontSize: 15, color: '#6366f1' },
+  placeholder:           { color: '#334155' },
+  fila:                  { flexDirection: 'row', gap: 12 },
+  mitad:                 { flex: 1 },
+  turnoCard:             { flexDirection: 'row', alignItems: 'center', gap: 12,
+                           backgroundColor: '#1e293b', borderRadius: 10, padding: 16,
+                           marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
+  turnoActivo:           { borderColor: '#6366f1', backgroundColor: '#1e1b4b' },
+  radio:                 { width: 20, height: 20, borderRadius: 10,
+                           borderWidth: 2, borderColor: '#475569' },
+  radioActivo:           { borderColor: '#6366f1', backgroundColor: '#6366f1' },
+  turnoText:             { fontSize: 15, color: '#94a3b8' },
+  turnoTextActivo:       { color: '#f1f5f9', fontWeight: '600' },
+
+  // ── Botones número de máquina ─────────────────────────────────
+  botonesNumero:         { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
+  botonNumero:           { width: 56, height: 56, borderRadius: 10,
+                           backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155',
+                           alignItems: 'center', justifyContent: 'center' },
+  botonNumeroLinea:      { width: 110, height: 64, borderRadius: 10 },  // más ancho para Copro/Orina
+  botonNumeroActivo:     { backgroundColor: '#1e1b4b', borderColor: '#6366f1' },
+  botonNumeroText:       { fontSize: 20, fontWeight: '600', color: '#475569' },
+  botonNumeroTextLinea:  { fontSize: 16, fontWeight: '700', color: '#475569' },
   botonNumeroTextActivo: { color: '#a5b4fc' },
+  botonNumeroSub:        { fontSize: 10, color: '#475569', marginTop: 2 },
+  botonNumeroSubActivo:  { color: '#818cf8' },
+
   // ─────────────────────────────────────────────────────────────
-  toggleFila:          { flexDirection: 'row', justifyContent: 'space-between',
-                         alignItems: 'center', backgroundColor: '#1e293b',
-                         borderRadius: 10, padding: 16, marginBottom: 14,
-                         borderWidth: 1, borderColor: '#334155' },
-  toggleLabel:         { fontSize: 15, color: '#f1f5f9' },
-  btn:                 { backgroundColor: '#6366f1', borderRadius: 14,
-                         padding: 18, alignItems: 'center', marginTop: 16 },
-  btnDisabled:         { opacity: 0.6 },
-  btnText:             { color: '#fff', fontSize: 17, fontWeight: '700' },
-  cantidadFormateada:  { fontSize: 13, color: '#6366f1', marginTop: -10, marginBottom: 14 },
+  toggleFila:            { flexDirection: 'row', justifyContent: 'space-between',
+                           alignItems: 'center', backgroundColor: '#1e293b',
+                           borderRadius: 10, padding: 16, marginBottom: 14,
+                           borderWidth: 1, borderColor: '#334155' },
+  toggleLabel:           { fontSize: 15, color: '#f1f5f9' },
+  btn:                   { backgroundColor: '#6366f1', borderRadius: 14,
+                           padding: 18, alignItems: 'center', marginTop: 16 },
+  btnDisabled:           { opacity: 0.6 },
+  btnText:               { color: '#fff', fontSize: 17, fontWeight: '700' },
+  cantidadFormateada:    { fontSize: 13, color: '#6366f1', marginTop: -10, marginBottom: 14 },
 });
