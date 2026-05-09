@@ -16,16 +16,31 @@
       "supportsTablet": true
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      }
-    },
+  "adaptiveIcon": {
+    "foregroundImage": "./assets/adaptive-icon.png",
+    "backgroundColor": "#ffffff"
+  },
+  "package": "com.kayxo49.apptablet2",
+  "permissions": ["INTERNET", "ACCESS_NETWORK_STATE"],
+  "usesCleartextTraffic": true
+},
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "326e66c6-ff27-4e22-834b-da45cc93cb97"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/326e66c6-ff27-4e22-834b-da45cc93cb97"
+    }
   }
 }
