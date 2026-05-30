@@ -1,34 +1,41 @@
 {
   "expo": {
-    "name": "app-tablet2",
+    "name": "Produccion",
     "slug": "app-tablet2",
     "scheme": "app-tablet2",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/kore_icon.png",
+    "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/kore_icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0F1923"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
-  "adaptiveIcon": {
-    "foregroundImage": "./assets/adaptive-icon.png",
-    "backgroundColor": "#ffffff"
-  },
-  "package": "com.kayxo49.apptablet2",
-  "permissions": ["INTERNET", "ACCESS_NETWORK_STATE"],
-  "usesCleartextTraffic": true
-},
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/kore_icon.png",
+        "backgroundColor": "#0F1923"
+      },
+      "package": "com.kayxo49.apptablet2",
+      "permissions": ["INTERNET", "ACCESS_NETWORK_STATE"]
+    },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/kore_icon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "extra": {
       "router": {},

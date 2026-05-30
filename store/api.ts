@@ -23,36 +23,57 @@ async function request<T>(
   return response.json();
 }
 
-export interface OrdenCreada        { id: number; numero_orden: string; activa: boolean; }
-export interface TurnoIniciado      { turno_id: number; mensaje: string; }
+export interface OrdenCreada            { id: number; numero_orden: string; activa: boolean; }
+export interface TurnoIniciado          { turno_id: number; mensaje: string; }
 export interface RegistroProduccionResp { id: number; turno_id: number; hora: string; cantidad: number; }
-export interface CausaParadaAPI     { id: number; codigo: number; descripcion: string; programada: boolean; tipo_maquina: string; activa: boolean; }
-export interface TipoDesperdicioAPI { id: number; codigo: number; descripcion: string; activa: boolean; }
-export interface ResumenTurno       { hora_fin: string | null; oee: number; disponibilidad: number; rendimiento: number; calidad: number; tiempo_programado: number; tiempo_real: number; contador_produccion: number; produccion_planeada: number; total_paradas_min: number; total_desperdicio: number; }
-export interface ProductoBD         { id: number; codigo: string; descripcion: string; material: string; cavidades: number; ciclos: number; peso_pieza: number; }
+export interface CausaParadaAPI         { id: number; codigo: number; descripcion: string; programada: boolean; tipo_maquina: string; activa: boolean; }
+export interface TipoDesperdicioAPI     { id: number; codigo: number; descripcion: string; activa: boolean; }
+export interface ProductoBD             { id: number; codigo: string; descripcion: string; material: string; cavidades: number; ciclos: number; peso_pieza: number; }
+
+// B3: ResumenTurno incluye ahora los registros completos del turno
+export interface ResumenTurno {
+  hora_fin:             string | null;
+  oee:                  number;
+  disponibilidad:       number;
+  rendimiento:          number;
+  calidad:              number;
+  tiempo_programado:    number;
+  tiempo_real:          number;
+  contador_produccion:  number;
+  total_produccion:     number;
+  produccion_planeada:  number;
+  total_paradas_min:    number;
+  total_desperdicio:    number;
+  orden_id?:            number;
+  // Campos completos del endpoint resumen (B3)
+  registros_produccion?: { id: number; turno_id: number; hora: string; cantidad: number }[];
+  paradas?:              { id: number; turno_id: number; codigo: number; descripcion: string; minutos: number; programada: boolean }[];
+  desperdicios?:         { id: number; turno_id: number; codigo: number; defecto: string; cantidad: number }[];
+  relevos?:              { id: number; turno_id: number; cedula_empleado: string; nombre_empleado: string; hora_inicio: string; hora_fin: string | null }[];
+}
 
 // Respuesta enriquecida del endpoint verificar:
 // No existe:        { existe: false }
 // Existe y cerrada: { existe: true, activa: false }
 // Existe y abierta: { existe: true, activa: true, orden_id, turno_activo_id?, ...datos }
 export interface VerificarOrdenResp {
-  existe:              boolean;
-  activa?:             boolean;
-  orden_id?:           number;
-  turno_activo_id?:    number | null;
-  codigo_producto?:    string;
+  existe:                boolean;
+  activa?:               boolean;
+  orden_id?:             number;
+  turno_activo_id?:      number | null;
+  codigo_producto?:      string;
   descripcion_producto?: string;
-  cantidad_producir?:  number;
-  material?:           string;
-  tipo_maquina?:       string;
-  numero_maquina?:     string;
-  cavidades?:          number;
-  ciclos?:             number;
-  tiene_pigmento?:     boolean;
-  numero_pigmento?:    string;
+  cantidad_producir?:    number;
+  material?:             string;
+  tipo_maquina?:         string;
+  numero_maquina?:       string;
+  cavidades?:            number;
+  ciclos?:               number;
+  tiene_pigmento?:       boolean;
+  numero_pigmento?:      string;
   descripcion_pigmento?: string;
-  cedula_lider?:       string;
-  nombre_lider?:       string;
+  cedula_lider?:         string;
+  nombre_lider?:         string;
 }
 
 // ─── AUTH ────────────────────────────────────────────────────
@@ -114,3 +135,47 @@ export const limpiarIds      = () => AsyncStorage.multiRemove(['orden_id', 'turn
 export const apiGetProducto         = (codigo: string)        => request<ProductoBD>(`/catalogos/productos/${encodeURIComponent(codigo)}`);
 export const apiGetCausasParada     = (tipo_maquina: string)  => request<CausaParadaAPI[]>(`/catalogos/causas-parada?tipo_maquina=${tipo_maquina}&solo_activas=true`);
 export const apiGetTiposDesperdicio = ()                      => request<TipoDesperdicioAPI[]>('/catalogos/tipos-desperdicio?solo_activas=true');
+
+// ── Agregar estas funciones al archivo store/api.ts existente ──
+// NO reemplazar el archivo completo — solo AGREGAR estas funciones al final
+
+// Iniciar parada con temporizador (nuevo endpoint)
+export async function apiIniciarParada(datos: {
+  turno_id: number;
+  codigo: number;
+  descripcion: string;
+  programada: boolean;
+  timestamp_inicio: number;
+}) {
+  const res = await fetch(`${API_URL}/produccion/parada/iniciar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(datos),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al iniciar parada');
+  }
+  return res.json();
+}
+
+// Finalizar parada activa (nuevo endpoint)
+export async function apiFinalizarParada(paradaId: number, timestamp_fin: number) {
+  const res = await fetch(`${API_URL}/produccion/parada/${paradaId}/finalizar`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timestamp_fin }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al finalizar parada');
+  }
+  return res.json();
+}
+
+// Consultar parada activa de un turno (para recuperar estado al volver a la app)
+export async function apiGetParadaActiva(turnoId: number) {
+  const res = await fetch(`${API_URL}/produccion/turno/${turnoId}/parada_activa`);
+  if (!res.ok) return null;
+  return res.json();
+}

@@ -14,6 +14,6 @@
  * ─────────────────────────────────────────────────────────────
  */
 
-export const SERVER_IP   = '192.168.1.12';
+export const SERVER_IP   = '192.168.1.6';
 export const SERVER_PORT = '8000';
 export const API_URL     = `http://${SERVER_IP}:${SERVER_PORT}`;

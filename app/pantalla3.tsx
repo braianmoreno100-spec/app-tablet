@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ScrollView, Alert, Modal, FlatList,
-  ActivityIndicator, BackHandler, Image, AppState
+  ActivityIndicator, BackHandler, AppState
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,17 +15,24 @@ import {
   apiGetResumenTurno,
   obtenerTurnoId, obtenerOrdenId, limpiarIds, apiValidarEmpleado,
   apiGetCausasParada, apiGetTiposDesperdicio,
+  apiIniciarParada, apiFinalizarParada, apiGetParadaActiva,
   CausaParadaAPI, TipoDesperdicioAPI,
 } from '../store/api';
+import { KoreLogo } from '../components/KoreLogo';
 
 interface RegistroProduccion  { hora: string; cantidad: number; }
 interface RegistroParada      { cod: number; descripcion: string; minutos: number; programada: boolean; }
 interface RegistroDesperdicio { cod: number; defecto: string; cantidad: number; }
 interface RegistroRelevo      { nombre: string; inicio: string; fin: string; }
 
-// FIX E14: clave única por registro para detectar duplicados
 interface PendienteBuffer { tipo: string; datos: object; timestamp: number; id: string; }
-const PENDING_KEY = 'registros_pendientes_v2'; // nueva clave para evitar conflicto con buffer anterior
+const PENDING_KEY = 'registros_pendientes_v2';
+
+function formatearTiempo(segundos: number): string {
+  const m = Math.floor(segundos / 60).toString().padStart(2, '0');
+  const s = (segundos % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
 
 export default function Pantalla3() {
   const router      = useRouter();
@@ -34,16 +41,22 @@ export default function Pantalla3() {
   const tipoMaquina = orden?.tipoMaquina ?? 'inyeccion';
   const meta        = orden?.cantidadProducir ?? 0;
 
-  const [conectado, setConectado] = useState(true);
+  const [conectado,     setConectado]     = useState(true);
   const [sincronizando, setSincronizando] = useState(false);
-  const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pingRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const conectadoRef = useRef(true);
 
-  // FIX E20: recalcular proxima hora al volver del background
+  const setConectadoSync = (val: boolean) => {
+    conectadoRef.current = val;
+    setConectado(val);
+  };
+
   const appStateRef = useRef(AppState.currentState);
   useEffect(() => {
     const sub = AppState.addEventListener('change', nextState => {
       if (appStateRef.current.match(/inactive|background/) && nextState === 'active') {
         calcularProximaHoraDesdeInicio();
+        recuperarParadaActiva();
       }
       appStateRef.current = nextState;
     });
@@ -53,22 +66,68 @@ export default function Pantalla3() {
   useEffect(() => {
     const verificarConexion = async () => {
       try {
-        const res = await fetch(`${API_URL}/health`, { signal: AbortSignal.timeout(8000) });
-        const estabaDesconectado = !conectado;
-        setConectado(res.ok);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`${API_URL}/health`, { signal: controller.signal });
+        clearTimeout(timer);
+        const estabaDesconectado = !conectadoRef.current;
+        setConectadoSync(res.ok);
         if (res.ok && estabaDesconectado) await sincronizarPendientes();
-      } catch { setConectado(false); }
+      } catch { setConectadoSync(false); }
     };
     verificarConexion();
     pingRef.current = setInterval(verificarConexion, 15000);
     return () => { if (pingRef.current) clearInterval(pingRef.current); };
-  }, [conectado]);
+  }, []);
 
-  // FIX E14: buffer con ID único por registro para evitar duplicados
+  const [produccion,          setProduccion]          = useState<RegistroProduccion[]>([]);
+  const [unidadesHora,        setUnidadesHora]        = useState('');
+  const [guardandoProduccion, setGuardandoProduccion] = useState(false);
+  const [errorProduccion,     setErrorProduccion]     = useState('');
+
+  const [desperdRegistrados,  setDesperdRegistrados]  = useState<RegistroDesperdicio[]>([]);
+  const [desperdSeleccionado, setDesperdSeleccionado] = useState<TipoDesperdicioAPI | null>(null);
+  const [cantidadDesperd,     setCantidadDesperd]     = useState('');
+  const [modalDesperdicios,   setModalDesperdicios]   = useState(false);
+  const [guardandoDesperd,    setGuardandoDesperd]    = useState(false);
+
+  const [paradasRegistradas,  setParadasRegistradas]  = useState<RegistroParada[]>([]);
+  const [paradaSeleccionada,  setParadaSeleccionada]  = useState<CausaParadaAPI | null>(null);
+  const [modalParadas,        setModalParadas]        = useState(false);
+  const [guardandoParada,     setGuardandoParada]     = useState(false);
+
+  const [paradaActiva,      setParadaActiva]      = useState(false);
+  const [paradaSegundos,    setParadaSegundos]    = useState(0);
+  const [paradaIdActiva,    setParadaIdActiva]    = useState<number | null>(null);
+  const paradaTimerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const paradaCausaActiva   = useRef<CausaParadaAPI | null>(null);
+  const paradaTsInicio      = useRef<number | null>(null);
+
+  const recuperarParadaActiva = async () => {
+    if (paradaActiva) return;
+    try {
+      const turnoId = await obtenerTurnoId();
+      if (!turnoId) return;
+      const resp = await apiGetParadaActiva(turnoId);
+      if (resp?.hay_parada_activa) {
+        paradaCausaActiva.current = {
+          id: 0, codigo: resp.codigo, descripcion: resp.descripcion,
+          programada: resp.programada, tipo_maquina: tipoMaquina, activa: true,
+        };
+        paradaTsInicio.current = resp.timestamp_inicio;
+        setParadaIdActiva(resp.parada_id);
+        setParadaSegundos(resp.segundos_activa ?? 0);
+        setParadaActiva(true);
+        let seg = resp.segundos_activa ?? 0;
+        paradaTimerRef.current = setInterval(() => { seg += 1; setParadaSegundos(seg); }, 1000);
+      }
+    } catch {}
+  };
+
   const guardarPendiente = async (tipo: string, datos: object): Promise<string> => {
     const id = `${tipo}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     try {
-      const raw       = await AsyncStorage.getItem(PENDING_KEY);
+      const raw        = await AsyncStorage.getItem(PENDING_KEY);
       const pendientes: PendienteBuffer[] = raw ? JSON.parse(raw) : [];
       pendientes.push({ tipo, datos, timestamp: Date.now(), id });
       await AsyncStorage.setItem(PENDING_KEY, JSON.stringify(pendientes));
@@ -76,38 +135,29 @@ export default function Pantalla3() {
     return id;
   };
 
-  // FIX E14: sincronizar pendientes sin riesgo de duplicados (por ID)
   const sincronizarPendientes = async () => {
     try {
       const raw = await AsyncStorage.getItem(PENDING_KEY);
       if (!raw) return;
       const pendientes: PendienteBuffer[] = JSON.parse(raw);
       if (pendientes.length === 0) return;
-
       const exitosos: string[] = [];
       for (const p of pendientes) {
         try {
-          if (p.tipo === 'produccion') {
-            const d = p.datos as any;
-            await apiAgregarProduccion(d.turno_id, d.hora, d.cantidad);
-          }
+          if (p.tipo === 'produccion') { const d = p.datos as any; await apiAgregarProduccion(d.turno_id, d.hora, d.cantidad); }
           if (p.tipo === 'parada')      await apiAgregarParada(p.datos as any);
           if (p.tipo === 'desperdicio') await apiAgregarDesperdicio(p.datos as any);
           exitosos.push(p.id);
         } catch {}
       }
-
       const restantes = pendientes.filter(p => !exitosos.includes(p.id));
       await AsyncStorage.setItem(PENDING_KEY, JSON.stringify(restantes));
-      if (exitosos.length > 0) {
-        Alert.alert('Sincronizado', `${exitosos.length} registro(s) pendiente(s) enviado(s) al servidor.`);
-      }
+      if (exitosos.length > 0) Alert.alert('Sincronizado', `${exitosos.length} registro(s) pendiente(s) enviado(s) al servidor.`);
     } catch {}
   };
 
   const pendientesCount = useRef(0);
 
-  // ── Catálogos ─────────────────────────────────────────────────────────────
   const [paradas,           setParadas]           = useState<CausaParadaAPI[]>([]);
   const [desperdicios,      setDesperdicios]      = useState<TipoDesperdicioAPI[]>([]);
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
@@ -116,44 +166,36 @@ export default function Pantalla3() {
     const inicializar = async () => {
       if (!obtenerTurnoGlobal()) {
         const guardado = await AsyncStorage.getItem('turno_activo');
-        if (guardado) {
-          try { guardarTurnoGlobal(JSON.parse(guardado)); } catch {}
-        }
+        if (guardado) { try { guardarTurnoGlobal(JSON.parse(guardado)); } catch {} }
       }
-      // FIX E13: recuperar registros individuales de BD, no solo el total
       try {
         const turnoId = await obtenerTurnoId();
         if (turnoId) {
-          const resumen = await apiGetResumenTurno(turnoId);
-          if (resumen.contador_produccion > 0) {
-            // Intentar cargar registros individuales desde el endpoint de registros
-            try {
-              const res = await fetch(`${API_URL}/produccion/registro/turno/${turnoId}`);
-              if (res.ok) {
-                const registros = await res.json();
-                if (Array.isArray(registros) && registros.length > 0) {
-                  setProduccion(registros.map((r: any) => ({ hora: r.hora, cantidad: r.cantidad })));
-                } else {
-                  // Fallback: mostrar total como sesión anterior
-                  setProduccion([{ hora: 'Sesión anterior', cantidad: resumen.contador_produccion }]);
-                }
-              }
-            } catch {
-              setProduccion([{ hora: 'Sesión anterior', cantidad: resumen.contador_produccion }]);
-            }
+          const resumen   = await apiGetResumenTurno(turnoId);
+          const totalProd = resumen.total_produccion ?? (resumen as any).contador_produccion ?? 0;
+          if (totalProd > 0) {
+            if (Array.isArray(resumen.registros_produccion) && resumen.registros_produccion.length > 0) {
+              setProduccion(resumen.registros_produccion.map((r: any) => ({ hora: r.hora, cantidad: r.cantidad })));
+            } else { setProduccion([{ hora: 'Sesión anterior', cantidad: totalProd }]); }
           }
           if (resumen.total_desperdicio > 0) {
-            setDesperdRegistrados([{ cod: 0, defecto: 'Sesiones anteriores', cantidad: resumen.total_desperdicio }]);
+            if (Array.isArray(resumen.desperdicios) && resumen.desperdicios.length > 0) {
+              setDesperdRegistrados(resumen.desperdicios.map((d: any) => ({ cod: d.codigo, defecto: d.defecto, cantidad: d.cantidad })));
+            } else { setDesperdRegistrados([{ cod: 0, defecto: 'Sesiones anteriores', cantidad: resumen.total_desperdicio }]); }
+          }
+          if (Array.isArray(resumen.paradas) && resumen.paradas.length > 0) {
+            setParadasRegistradas(resumen.paradas.filter((p: any) => !p.activa).map((p: any) => ({
+              cod: p.codigo, descripcion: p.descripcion, minutos: p.minutos, programada: p.programada,
+            })));
           }
         }
       } catch {}
-
-      // FIX E20: contar pendientes del buffer para mostrar indicador
       try {
         const raw = await AsyncStorage.getItem(PENDING_KEY);
         const p   = raw ? JSON.parse(raw) : [];
         pendientesCount.current = p.length;
       } catch {}
+      await recuperarParadaActiva();
     };
     inicializar();
   }, []);
@@ -162,48 +204,24 @@ export default function Pantalla3() {
     const cargarCatalogos = async () => {
       try {
         const [causas, tipos] = await Promise.all([apiGetCausasParada(tipoMaquina), apiGetTiposDesperdicio()]);
-        setParadas(causas);
-        setDesperdicios(tipos);
-      } catch {
-        Alert.alert('Aviso', 'No se pudieron cargar los catálogos. Verifica la conexión.');
-      } finally {
-        setCargandoCatalogos(false);
-      }
+        setParadas(causas); setDesperdicios(tipos);
+      } catch { Alert.alert('Aviso', 'No se pudieron cargar los catálogos. Verifica la conexión.'); }
+      finally { setCargandoCatalogos(false); }
     };
     cargarCatalogos();
   }, [tipoMaquina]);
 
   useEffect(() => {
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      Alert.alert('Turno en curso',
-        'No puedes salir mientras hay un turno activo. Usa "Fin de turno" para cerrar correctamente.',
-        [{ text: 'Entendido', style: 'cancel' }]
-      );
+      Alert.alert('Turno en curso', 'No puedes salir mientras hay un turno activo. Usa "Fin de turno" para cerrar correctamente.',
+        [{ text: 'Entendido', style: 'cancel' }]);
       return true;
     });
     return () => backHandler.remove();
   }, []);
 
-  // ── Estado producción ─────────────────────────────────────────────────────
-  const [produccion,          setProduccion]          = useState<RegistroProduccion[]>([]);
-  const [unidadesHora,        setUnidadesHora]        = useState('');
-  const [guardandoProduccion, setGuardandoProduccion] = useState(false);
+  useEffect(() => { return () => { if (paradaTimerRef.current) clearInterval(paradaTimerRef.current); }; }, []);
 
-  // ── Estado paradas ────────────────────────────────────────────────────────
-  const [paradasRegistradas, setParadasRegistradas] = useState<RegistroParada[]>([]);
-  const [paradaSeleccionada, setParadaSeleccionada] = useState<CausaParadaAPI | null>(null);
-  const [minutosParada,      setMinutosParada]      = useState('');
-  const [modalParadas,       setModalParadas]       = useState(false);
-  const [guardandoParada,    setGuardandoParada]    = useState(false);
-
-  // ── Estado desperdicios ───────────────────────────────────────────────────
-  const [desperdRegistrados,  setDesperdRegistrados]  = useState<RegistroDesperdicio[]>([]);
-  const [desperdSeleccionado, setDesperdSeleccionado] = useState<TipoDesperdicioAPI | null>(null);
-  const [cantidadDesperd,     setCantidadDesperd]     = useState('');
-  const [modalDesperdicios,   setModalDesperdicios]   = useState(false);
-  const [guardandoDesperd,    setGuardandoDesperd]    = useState(false);
-
-  // ── Estado relevos ────────────────────────────────────────────────────────
   const [cedulaRelevo,     setCedulaRelevo]     = useState('');
   const [nombreRelevo,     setNombreRelevo]     = useState('');
   const [relevoActivo,     setRelevoActivo]     = useState(false);
@@ -211,7 +229,6 @@ export default function Pantalla3() {
   const [relevoIdActivo,   setRelevoIdActivo]   = useState<number | null>(null);
   const [historialRelevos, setHistorialRelevos] = useState<RegistroRelevo[]>([]);
 
-  // ── Timer próxima hora ────────────────────────────────────────────────────
   const intervalRef    = useRef<ReturnType<typeof setInterval> | null>(null);
   const proximaHoraRef = useRef<Date | null>(null);
   const [proximaHora, setProximaHora] = useState('');
@@ -223,11 +240,8 @@ export default function Pantalla3() {
       const partes = horaInicioStr.split(':');
       const hh = parseInt(partes[0], 10);
       const mm = parseInt(partes[1], 10);
-      base = new Date();
-      base.setHours(hh, mm, 0, 0);
-    } else {
-      base = new Date();
-    }
+      base = new Date(); base.setHours(hh, mm, 0, 0);
+    } else { base = new Date(); }
     const proxima = new Date(base);
     const ahora   = new Date();
     while (proxima <= ahora) { proxima.setHours(proxima.getHours() + 1); }
@@ -255,135 +269,134 @@ export default function Pantalla3() {
 
   const horaActual = () => new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
 
-  // ── Cálculos derivados ────────────────────────────────────────────────────
-  const totalContador     = produccion.reduce((acc, r) => acc + r.cantidad, 0);
-  const totalRechazados   = desperdRegistrados.reduce((acc, r) => acc + r.cantidad, 0);
-  // FIX E19: progreso basado en prod_real (sin rechazos), igual que el OEE
+  const totalContador      = produccion.reduce((acc, r) => acc + r.cantidad, 0);
+  const totalRechazados    = desperdRegistrados.reduce((acc, r) => acc + r.cantidad, 0);
   const totalProducidoReal = Math.max(0, totalContador - totalRechazados);
   const totalDesperdicios  = totalRechazados;
   const progresoPct        = meta > 0 ? Math.min(100, Math.round((totalProducidoReal / meta) * 100)) : 0;
   const ordenCompleta      = totalProducidoReal >= meta && meta > 0;
 
-  // FIX E15: límite teórico correcto por tipo de máquina
   const limiteUdsHora = (() => {
-    const cav  = Number(orden?.cavidades ?? 0);
-    const cic  = Number(orden?.ciclos    ?? 0);
-    if (cav <= 0 || cic <= 0) return 50_000;
-    if (tipoMaquina === 'acondicionamiento') {
-      // ciclos = uds/hora por operario, cav = nro. operarios → NO multiplicar por 60
-      return cav * cic;
-    }
-    // inyeccion, soplado, linea: ciclos = ciclos/min → × 60 = ciclos/hora
-    return cav * cic * 60;
+    const cav = Number(orden?.cavidades ?? 0);
+    const cic = Number(orden?.ciclos    ?? 0);
+    if (cav <= 0 || cic <= 0) return 0;
+    if (tipoMaquina === 'acondicionamiento') return Math.floor(cav * cic);
+    return Math.floor(cav * cic * 60);
   })();
 
-  // ── Sincronización manual ────────────────────────────────────────────────
+  const ultimaHoraProduccion = produccion.length > 0 ? produccion[produccion.length - 1].cantidad : null;
+  const ritmoVsMeta = (() => {
+    if (ultimaHoraProduccion == null || limiteUdsHora <= 0) return null;
+    return Math.round(((ultimaHoraProduccion - limiteUdsHora) / limiteUdsHora) * 100);
+  })();
+  const colorRitmo  = ritmoVsMeta == null ? '#6b8aa0' : ritmoVsMeta >= 0 ? '#00C896' : ritmoVsMeta >= -20 ? '#FF6B35' : '#f87171';
+  const bgRitmo     = ritmoVsMeta == null ? '#1e2d3d' : ritmoVsMeta >= 0 ? '#003d2e' : ritmoVsMeta >= -20 ? '#2d1f00' : '#3b1010';
+  const borderRitmo = ritmoVsMeta == null ? '#243040' : ritmoVsMeta >= 0 ? '#00573d' : ritmoVsMeta >= -20 ? '#854d0e' : '#5a1a1a';
+
   const handleSincronizarManual = async () => {
     setSincronizando(true);
     try {
-      const res = await fetch(`${API_URL}/health`, { signal: AbortSignal.timeout(8000) });
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      const res = await fetch(`${API_URL}/health`, { signal: ctrl.signal });
+      clearTimeout(t);
       if (!res.ok) throw new Error();
-      setConectado(true);
+      setConectadoSync(true);
       const raw        = await AsyncStorage.getItem(PENDING_KEY);
       const pendientes = raw ? JSON.parse(raw) : [];
-      if (pendientes.length === 0) {
-        Alert.alert("✓ Al día", "No hay registros pendientes.");
-      } else {
-        await sincronizarPendientes();
-      }
+      if (pendientes.length === 0) { Alert.alert('✓ Al día', 'No hay registros pendientes.'); }
+      else { await sincronizarPendientes(); }
     } catch {
-      setConectado(false);
-      Alert.alert("Sin conexión", "No se pudo conectar al servidor. Los registros siguen guardados localmente.");
-    } finally {
-      setSincronizando(false);
-    }
+      setConectadoSync(false);
+      Alert.alert('Sin conexión', 'No se pudo conectar al servidor. Los registros siguen guardados localmente.');
+    } finally { setSincronizando(false); }
   };
 
-  // ── Producción ─────────────────────────────────────────────────────────---
+  const handleCambioUnidades = (texto: string) => {
+    setUnidadesHora(texto);
+    const cantidad = Number(texto);
+    if (limiteUdsHora > 0 && cantidad > limiteUdsHora) {
+      setErrorProduccion(`Máximo permitido: ${limiteUdsHora.toLocaleString('es-CO')} uds/hora`);
+    } else { setErrorProduccion(''); }
+  };
+
+  const produccionSuperaLimite = limiteUdsHora > 0 && Number(unidadesHora) > limiteUdsHora;
+
   const handleAgregarProduccion = async () => {
-    if (!unidadesHora || Number(unidadesHora) <= 0) {
-      Alert.alert('Error', 'Ingresa una cantidad válida'); return;
-    }
-    const cantidad = Number(unidadesHora);
-    if (cantidad > limiteUdsHora) {
-      Alert.alert(
-        'Cantidad inusual',
-        `Registraste ${cantidad.toLocaleString('es-CO')} unidades, pero el máximo teórico por hora es ${limiteUdsHora.toLocaleString('es-CO')} uds. ¿Es correcto?`,
-        [
-          { text: 'Corregir', style: 'cancel' },
-          { text: 'Registrar igual', onPress: () => guardarProduccion(cantidad) },
-        ]
-      );
-      return;
-    }
-    await guardarProduccion(cantidad);
+    if (!unidadesHora || Number(unidadesHora) <= 0) { Alert.alert('Error', 'Ingresa una cantidad válida'); return; }
+    if (produccionSuperaLimite) return;
+    await guardarProduccion(Number(unidadesHora));
   };
 
-  // FIX E14: lógica de guardado sin riesgo de duplicados
   const guardarProduccion = async (cantidad: number) => {
     const hora = horaActual();
     setGuardandoProduccion(true);
     try {
       const turnoId = await obtenerTurnoId();
       if (!turnoId) throw new Error('No hay turno activo');
-
-      if (!conectado) {
-        // Sin conexión — guardar en buffer con ID único
+      if (!conectadoRef.current) {
         await guardarPendiente('produccion', { turno_id: turnoId, hora, cantidad });
-        setProduccion(p => [...p, { hora, cantidad }]);
-        setUnidadesHora('');
-      } else {
-        // Con conexión — enviar directo, SIN buffer
-        await apiAgregarProduccion(turnoId, hora, cantidad);
-        setProduccion(p => [...p, { hora, cantidad }]);
-        setUnidadesHora('');
-      }
+      } else { await apiAgregarProduccion(turnoId, hora, cantidad); }
+      setProduccion(p => [...p, { hora, cantidad }]);
+      setUnidadesHora(''); setErrorProduccion('');
     } catch (error: any) {
-      // FIX E14: si falla la conexión, guardar en buffer UNA SOLA VEZ
-      // No reintentar desde catch — el buffer se sincroniza automáticamente
       const turnoId = await obtenerTurnoId().catch(() => null);
       if (turnoId) {
         await guardarPendiente('produccion', { turno_id: turnoId, hora, cantidad });
         setProduccion(p => [...p, { hora, cantidad }]);
-        setUnidadesHora('');
+        setUnidadesHora(''); setErrorProduccion('');
         Alert.alert('Sin conexión', 'Registro guardado localmente. Se enviará cuando vuelva la señal.');
-      } else {
-        Alert.alert('Error', 'No se pudo guardar el registro');
-      }
-    } finally {
-      setGuardandoProduccion(false);
-    }
+      } else { Alert.alert('Error', 'No se pudo guardar el registro'); }
+    } finally { setGuardandoProduccion(false); }
   };
 
-  // ── Paradas ───────────────────────────────────────────────────────────────
-  const handleAgregarParada = async () => {
-    if (!paradaSeleccionada) { Alert.alert('Error', 'Selecciona el tipo de parada'); return; }
-    if (!minutosParada || Number(minutosParada) <= 0) { Alert.alert('Error', 'Ingresa los minutos'); return; }
+  const handleIniciarParada = async () => {
+    if (!paradaSeleccionada) { Alert.alert('Error', 'Selecciona el tipo de parada primero'); return; }
+    if (paradaActiva) { Alert.alert('Error', 'Ya hay una parada activa. Finalízala antes de iniciar otra.'); return; }
+    const tsInicio = Date.now();
+    paradaCausaActiva.current = paradaSeleccionada;
+    paradaTsInicio.current    = tsInicio;
+    try {
+      const turnoId = await obtenerTurnoId();
+      if (!turnoId) throw new Error('No hay turno activo');
+      if (conectadoRef.current) {
+        const resp = await apiIniciarParada({
+          turno_id: turnoId, codigo: paradaSeleccionada.codigo,
+          descripcion: paradaSeleccionada.descripcion, programada: paradaSeleccionada.programada,
+          timestamp_inicio: tsInicio,
+        });
+        setParadaIdActiva(resp.id);
+      } else { setParadaIdActiva(null); }
+    } catch (error: any) { Alert.alert('Error', error.message || 'No se pudo iniciar la parada'); return; }
+    setParadaSeleccionada(null); setParadaSegundos(0); setParadaActiva(true);
+    paradaTimerRef.current = setInterval(() => { setParadaSegundos(s => s + 1); }, 1000);
+  };
+
+  const handleFinalizarParada = async () => {
+    if (!paradaActiva || !paradaCausaActiva.current) return;
+    if (paradaTimerRef.current) { clearInterval(paradaTimerRef.current); paradaTimerRef.current = null; }
+    const tsFin   = Date.now();
+    const minutos = Math.max(1, Math.round(paradaSegundos / 60));
+    const causa   = paradaCausaActiva.current;
     setGuardandoParada(true);
     try {
       const turnoId = await obtenerTurnoId();
       if (!turnoId) throw new Error('No hay turno activo');
-      const datosParada = {
-        turno_id: turnoId, codigo: paradaSeleccionada.codigo,
-        descripcion: paradaSeleccionada.descripcion,
-        minutos: Number(minutosParada), programada: paradaSeleccionada.programada,
-      };
-      if (!conectado) {
-        await guardarPendiente('parada', datosParada);
+      if (paradaIdActiva && conectadoRef.current) {
+        await apiFinalizarParada(paradaIdActiva, tsFin);
       } else {
-        await apiAgregarParada(datosParada);
+        const datosParada = { turno_id: turnoId, codigo: causa.codigo, descripcion: causa.descripcion, minutos, programada: causa.programada };
+        if (conectadoRef.current) { await apiAgregarParada(datosParada); }
+        else { await guardarPendiente('parada', datosParada); }
       }
-      setParadasRegistradas(p => [...p, {
-        cod: paradaSeleccionada.codigo, descripcion: paradaSeleccionada.descripcion,
-        minutos: Number(minutosParada), programada: paradaSeleccionada.programada,
-      }]);
-      setParadaSeleccionada(null); setMinutosParada('');
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo guardar la parada');
-    } finally { setGuardandoParada(false); }
+      setParadasRegistradas(p => [...p, { cod: causa.codigo, descripcion: causa.descripcion, minutos, programada: causa.programada }]);
+    } catch (error: any) { Alert.alert('Error', error.message || 'No se pudo guardar la parada'); }
+    finally {
+      setGuardandoParada(false); setParadaActiva(false); setParadaSegundos(0);
+      setParadaIdActiva(null); paradaCausaActiva.current = null; paradaTsInicio.current = null;
+    }
   };
 
-  // ── Desperdicios ──────────────────────────────────────────────────────────
   const handleAgregarDesperdicio = async () => {
     if (!desperdSeleccionado) { Alert.alert('Error', 'Selecciona el tipo de defecto'); return; }
     if (!cantidadDesperd || Number(cantidadDesperd) <= 0) { Alert.alert('Error', 'Ingresa la cantidad'); return; }
@@ -391,33 +404,19 @@ export default function Pantalla3() {
     try {
       const turnoId = await obtenerTurnoId();
       if (!turnoId) throw new Error('No hay turno activo');
-      const datosDesperd = {
-        turno_id: turnoId, codigo: desperdSeleccionado.codigo,
-        defecto: desperdSeleccionado.descripcion, cantidad: Number(cantidadDesperd),
-      };
-      if (!conectado) {
-        await guardarPendiente('desperdicio', datosDesperd);
-      } else {
-        await apiAgregarDesperdicio(datosDesperd);
-      }
-      setDesperdRegistrados(p => [...p, {
-        cod: desperdSeleccionado.codigo, defecto: desperdSeleccionado.descripcion,
-        cantidad: Number(cantidadDesperd),
-      }]);
+      const datosDesperd = { turno_id: turnoId, codigo: desperdSeleccionado.codigo, defecto: desperdSeleccionado.descripcion, cantidad: Number(cantidadDesperd) };
+      if (!conectadoRef.current) { await guardarPendiente('desperdicio', datosDesperd); }
+      else { await apiAgregarDesperdicio(datosDesperd); }
+      setDesperdRegistrados(p => [...p, { cod: desperdSeleccionado.codigo, defecto: desperdSeleccionado.descripcion, cantidad: Number(cantidadDesperd) }]);
       setDesperdSeleccionado(null); setCantidadDesperd('');
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo guardar el desperdicio');
-    } finally { setGuardandoDesperd(false); }
+    } catch (error: any) { Alert.alert('Error', error.message || 'No se pudo guardar el desperdicio'); }
+    finally { setGuardandoDesperd(false); }
   };
 
-  // ── Relevos ───────────────────────────────────────────────────────────────
   const handleInicioRelevo = async () => {
     if (!cedulaRelevo || !nombreRelevo) { Alert.alert('Error', 'Ingresa la cédula del empleado en relevo'); return; }
     if (relevoActivo) { Alert.alert('Error', 'Ya hay un relevo activo'); return; }
-    // FIX E17: no permitir relevo de sí mismo
-    if (cedulaRelevo === turno?.cedulaEmpleado) {
-      Alert.alert('Error', 'El empleado en relevo debe ser diferente al operario actual'); return;
-    }
+    if (cedulaRelevo === turno?.cedulaEmpleado) { Alert.alert('Error', 'El empleado en relevo debe ser diferente al operario actual'); return; }
     const hora = horaActual();
     try {
       const turnoId = await obtenerTurnoId();
@@ -435,91 +434,116 @@ export default function Pantalla3() {
       setHistorialRelevos(h => [...h, { nombre: nombreRelevo, inicio: horaInicioRelevo, fin: hora }]);
       setRelevoActivo(false); setRelevoIdActivo(null);
       setCedulaRelevo(''); setNombreRelevo(''); setHoraInicioRelevo('');
+    } catch (error: any) { Alert.alert('Error', error?.message || error?.detail || 'No se pudo cerrar el relevo'); }
+  };
+
+  // ── Lógica compartida para cerrar turno ────────────────────────────────────
+  const cerrarTurnoBase = async (): Promise<boolean> => {
+    if (paradaActiva) {
+      Alert.alert('Parada activa', 'Hay una parada en curso. Finalízala antes de continuar.', [{ text: 'Entendido', style: 'cancel' }]);
+      return false;
+    }
+    if (relevoActivo && relevoIdActivo) {
+      const hora = horaActual();
+      try { await apiCerrarRelevo(relevoIdActivo, hora); } catch {}
+    }
+    try {
+      const turnoId = await obtenerTurnoId();
+      if (turnoId) await apiCerrarTurno(turnoId, horaActual());
+      guardarTurnoGlobal(null);
+      return true;
     } catch (error: any) {
-      Alert.alert('Error', error?.message || error?.detail || 'No se pudo cerrar el relevo');
+      Alert.alert('Error', error?.message || 'No se pudo cerrar el turno');
+      return false;
     }
   };
 
-  // ── Fin turno ─────────────────────────────────────────────────────────────
+  // ── Fin de turno → va a pantalla 2 (nuevo turno en la misma orden) ─────────
   const handleFinTurno = () => {
-    if (relevoActivo && relevoIdActivo) {
-      Alert.alert('Relevo activo', `Hay un relevo en curso de ${nombreRelevo}. Debes cerrarlo antes.`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Cerrar relevo y turno', style: 'destructive', onPress: async () => {
-            try {
-              const hora = horaActual();
-              await apiCerrarRelevo(relevoIdActivo, hora);
-              const turnoId = await obtenerTurnoId();
-              if (turnoId) await apiCerrarTurno(turnoId, hora);
-              guardarTurnoGlobal(null);
-              router.replace('/pantalla2');
-            } catch (error: any) {
-              Alert.alert('Error', error?.message || 'No se pudo cerrar el relevo y el turno');
-            }
-          }},
-        ]
-      );
+    if (paradaActiva) {
+      Alert.alert('Parada activa', 'Hay una parada en curso. Finalízala antes de cerrar el turno.', [{ text: 'Entendido', style: 'cancel' }]);
       return;
     }
-    Alert.alert('Fin de turno', '¿Deseas cerrar el turno actual?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Confirmar', onPress: async () => {
-        try {
-          const turnoId = await obtenerTurnoId();
-          if (turnoId) await apiCerrarTurno(turnoId, horaActual());
-          guardarTurnoGlobal(null);
-          router.replace('/pantalla2');
-        } catch (error: any) {
-          Alert.alert('Error', error?.message || 'No se pudo cerrar el turno');
-        }
-      }},
-    ]);
+    if (relevoActivo && relevoIdActivo) {
+      Alert.alert('Relevo activo', `Hay un relevo en curso de ${nombreRelevo}. Se cerrará automáticamente.`, [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Cerrar relevo y turno', style: 'destructive', onPress: async () => {
+          const ok = await cerrarTurnoBase();
+          if (ok) router.replace('/pantalla2');
+        }},
+      ]);
+      return;
+    }
+    Alert.alert(
+      'Fin de turno',
+      '¿Deseas cerrar este turno?\n\nPodrás iniciar un nuevo turno en la misma orden.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Confirmar', onPress: async () => {
+          const ok = await cerrarTurnoBase();
+          if (ok) router.replace('/pantalla2');
+        }},
+      ]
+    );
   };
 
-  // ── Fin orden ─────────────────────────────────────────────────────────────
+  // ── Pausar orden → cierra turno y va a pantalla 1 (deja orden para después) ─
+  const handlePausarOrden = () => {
+    if (paradaActiva) {
+      Alert.alert('Parada activa', 'Hay una parada en curso. Finalízala antes de pausar la orden.', [{ text: 'Entendido', style: 'cancel' }]);
+      return;
+    }
+    Alert.alert(
+      '⏸ Pausar orden',
+      `¿Deseas pausar la orden ${orden?.numeroOrden}?\n\nEl turno se cerrará y la orden quedará disponible para que otro operario la retome desde la pantalla principal.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Pausar orden', style: 'destructive', onPress: async () => {
+          const ok = await cerrarTurnoBase();
+          if (ok) {
+            // Limpiar estado de turno pero mantener la orden activa en el servidor
+            // La orden queda activa=true en BD — el próximo operario la retoma desde pantalla 1
+            router.replace('/pantalla1');
+          }
+        }},
+      ]
+    );
+  };
+
+  // ── Fin de orden ───────────────────────────────────────────────────────────
   const handleFinOrden = () => {
     if (!ordenCompleta) return;
-
-    // FIX E18: verificar pendientes del buffer antes de cerrar la orden
+    if (paradaActiva) {
+      Alert.alert('Parada activa', 'Finaliza la parada en curso antes de cerrar la orden.', [{ text: 'Entendido', style: 'cancel' }]);
+      return;
+    }
     const verificarYCerrar = async () => {
       try {
-        const raw       = await AsyncStorage.getItem(PENDING_KEY);
+        const raw        = await AsyncStorage.getItem(PENDING_KEY);
         const pendientes = raw ? JSON.parse(raw) : [];
         if (pendientes.length > 0) {
-          Alert.alert(
-            'Registros pendientes',
-            `Hay ${pendientes.length} registro(s) sin sincronizar con el servidor. ¿Deseas sincronizar antes de cerrar la orden?`,
-            [
-              { text: 'Sincronizar primero', onPress: async () => {
-                await sincronizarPendientes();
-                confirmarFinOrden(relevoActivo && !!relevoIdActivo);
-              }},
-              { text: 'Cerrar sin sincronizar', style: 'destructive', onPress: () => confirmarFinOrden(relevoActivo && !!relevoIdActivo) },
-              { text: 'Cancelar', style: 'cancel' },
-            ]
-          );
+          Alert.alert('Registros pendientes', `Hay ${pendientes.length} registro(s) sin sincronizar. ¿Sincronizar antes de cerrar la orden?`, [
+            { text: 'Sincronizar primero', onPress: async () => { await sincronizarPendientes(); confirmarFinOrden(); }},
+            { text: 'Cerrar sin sincronizar', style: 'destructive', onPress: confirmarFinOrden },
+            { text: 'Cancelar', style: 'cancel' },
+          ]);
           return;
         }
       } catch {}
-      confirmarFinOrden(relevoActivo && !!relevoIdActivo);
+      confirmarFinOrden();
     };
-
     if (relevoActivo && relevoIdActivo) {
-      Alert.alert('Relevo activo', `Hay un relevo en curso. Se cerrará al finalizar la orden.`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Cerrar relevo y orden', style: 'destructive', onPress: verificarYCerrar },
-        ]
-      );
+      Alert.alert('Relevo activo', 'Hay un relevo en curso. Se cerrará al finalizar la orden.', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Cerrar relevo y orden', style: 'destructive', onPress: verificarYCerrar },
+      ]);
       return;
     }
     verificarYCerrar();
   };
 
-  const confirmarFinOrden = (cerrarRelevo: boolean) => {
-    Alert.alert(
-      'Fin de orden',
+  const confirmarFinOrden = () => {
+    Alert.alert('Fin de orden',
       `Producidos: ${totalProducidoReal.toLocaleString('es-CO')} uds reales de ${meta.toLocaleString('es-CO')}. ¿Confirmar cierre?`,
       [
         { text: 'Cancelar', style: 'cancel' },
@@ -528,7 +552,7 @@ export default function Pantalla3() {
             const hora    = horaActual();
             const turnoId = await obtenerTurnoId();
             const ordenId = await obtenerOrdenId();
-            if (cerrarRelevo && relevoIdActivo) await apiCerrarRelevo(relevoIdActivo, hora).catch(() => {});
+            if (relevoActivo && relevoIdActivo) await apiCerrarRelevo(relevoIdActivo, hora).catch(() => {});
             if (turnoId) await apiCerrarTurno(turnoId, hora);
             if (ordenId) await apiCerrarOrden(ordenId);
           } catch {}
@@ -544,7 +568,7 @@ export default function Pantalla3() {
   if (cargandoCatalogos) {
     return (
       <View style={s.loadingContainer}>
-        <ActivityIndicator size="large" color="#5A9E2F" />
+        <ActivityIndicator size="large" color="#00C896" />
         <Text style={s.loadingText}>Cargando catálogos...</Text>
       </View>
     );
@@ -553,18 +577,21 @@ export default function Pantalla3() {
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
 
-      {/* ── Banner sin conexión ── */}
       {!conectado && (
         <View style={s.bannerSinConexion}>
-          <Text style={s.bannerTexto}>
-            ⚠ Sin conexión — los registros se guardan localmente y se enviarán cuando vuelva la señal
-          </Text>
+          <Text style={s.bannerTexto}>⚠ Sin conexión — los registros se guardan localmente y se enviarán cuando vuelva la señal</Text>
         </View>
       )}
 
-      {/* ── Meta y progreso ── */}
+      {paradaActiva && (
+        <View style={s.bannerParadaActiva}>
+          <Text style={s.bannerParadaTexto} numberOfLines={1}>🔴 {paradaCausaActiva.current?.descripcion}</Text>
+          <Text style={s.bannerParadaCronometro}>{formatearTiempo(paradaSegundos)}</Text>
+        </View>
+      )}
+
+      {/* Meta y progreso */}
       <View style={s.metaCard}>
-        {/* ── Indicador de conexión + botón sincronizar ── */}
         <View style={s.conexionRow}>
           <View style={s.conexionIndicador}>
             <View style={[s.conexionDot, conectado ? s.conexionDotOk : s.conexionDotFail]} />
@@ -572,19 +599,13 @@ export default function Pantalla3() {
               {conectado ? 'Conectado' : 'Sin conexión'}
             </Text>
           </View>
-          <TouchableOpacity
-            style={[s.btnSync, sincronizando && s.btnSyncActivo]}
-            onPress={handleSincronizarManual}
-            disabled={sincronizando}
-          >
+          <TouchableOpacity style={[s.btnSync, sincronizando && s.btnSyncActivo]} onPress={handleSincronizarManual} disabled={sincronizando}>
             <Text style={s.btnSyncTexto}>{sincronizando ? '↻ Sincronizando...' : '↻ Sincronizar'}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={s.metaRow}>
-          <View style={s.metaLogoWrap}>
-            <Image source={require('../assets/logo_inverfarma.png')} style={s.metaLogo} resizeMode="contain" />
-          </View>
+          <View style={s.metaLogoWrap}><KoreLogo size={40} dark /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.metaLabel}>Meta a producir</Text>
             <Text style={s.metaValor}>{meta.toLocaleString('es-CO')} uds</Text>
@@ -598,10 +619,9 @@ export default function Pantalla3() {
           <View style={[s.barraRelleno, { width: `${progresoPct}%` as any }, ordenCompleta && s.barraRellenoOk]} />
         </View>
 
-        {/* FIX E19: mostrar prod real (sin rechazos) en el progreso */}
         <Text style={s.metaInfo}>
           Producido real: <Text style={s.metaInfoAcento}>{totalProducidoReal.toLocaleString('es-CO')} uds</Text>
-          {'  ·  '}Contador: <Text style={{ color: '#888' }}>{totalContador.toLocaleString('es-CO')}</Text>
+          {'  ·  '}Contador: <Text style={{ color: '#6b8aa0' }}>{totalContador.toLocaleString('es-CO')}</Text>
           {totalRechazados > 0 && <Text style={{ color: '#f87171' }}>  ·  Rechazos: {totalRechazados.toLocaleString('es-CO')}</Text>}
         </Text>
         <Text style={s.metaInfo}>
@@ -614,26 +634,49 @@ export default function Pantalla3() {
         </Text>
       </View>
 
-      {/* ── Producción ── */}
+      {/* Producción */}
       <View style={s.card}>
         <Text style={s.seccion}>PRODUCCIÓN POR HORA</Text>
+        {limiteUdsHora > 0 && (
+          <View style={s.ritmoDashboard}>
+            <View style={[s.ritmoTarjeta, { backgroundColor: '#003d2e', borderColor: '#00573d' }]}>
+              <Text style={[s.ritmoLabel, { color: '#1e6b50' }]}>Meta/hora</Text>
+              <Text style={[s.ritmoValor, { color: '#00C896' }]}>{limiteUdsHora.toLocaleString('es-CO')}</Text>
+              <Text style={[s.ritmoSub,   { color: '#1e6b50' }]}>uds esperadas</Text>
+            </View>
+            <View style={[s.ritmoTarjeta, { backgroundColor: '#1e2d3d', borderColor: '#243040' }]}>
+              <Text style={[s.ritmoLabel, { color: '#3d5568' }]}>Última hora</Text>
+              <Text style={[s.ritmoValor, { color: '#b8c8d8' }]}>
+                {ultimaHoraProduccion != null ? ultimaHoraProduccion.toLocaleString('es-CO') : '—'}
+              </Text>
+              <Text style={[s.ritmoSub, { color: '#3d5568' }]}>uds registradas</Text>
+            </View>
+            <View style={[s.ritmoTarjeta, { backgroundColor: bgRitmo, borderColor: borderRitmo }]}>
+              <Text style={[s.ritmoLabel, { color: colorRitmo, opacity: 0.7 }]}>Ritmo</Text>
+              <Text style={[s.ritmoValor, { color: colorRitmo }]}>
+                {ritmoVsMeta == null ? '—' : ritmoVsMeta >= 0 ? `+${ritmoVsMeta}%` : `${ritmoVsMeta}%`}
+              </Text>
+              <Text style={[s.ritmoSub, { color: colorRitmo, opacity: 0.7 }]}>
+                {ritmoVsMeta == null ? 'sin datos aún' : ritmoVsMeta >= 0 ? 'sobre la meta' : 'bajo la meta'}
+              </Text>
+            </View>
+          </View>
+        )}
         <View style={s.fila}>
-          <TextInput
-            style={[s.input, { flex: 1 }]} value={unidadesHora} onChangeText={setUnidadesHora}
-            placeholder="Unidades producidas" placeholderTextColor="#555" keyboardType="numeric"
-          />
-          <TouchableOpacity
-            style={[s.btnAgregar, guardandoProduccion && s.btnDisabled]}
-            onPress={handleAgregarProduccion} disabled={guardandoProduccion}
-          >
+          <View style={{ flex: 1 }}>
+            <TextInput style={[s.input, produccionSuperaLimite && s.inputError]}
+              value={unidadesHora} onChangeText={handleCambioUnidades}
+              placeholder="Unidades producidas esta hora" placeholderTextColor="#3d5568" keyboardType="numeric" />
+            {errorProduccion !== '' && <Text style={s.textoError}>{errorProduccion}</Text>}
+          </View>
+          <TouchableOpacity style={[s.btnAgregar, (guardandoProduccion || produccionSuperaLimite) && s.btnDisabled]}
+            onPress={handleAgregarProduccion} disabled={guardandoProduccion || produccionSuperaLimite}>
             <Text style={s.btnAgregarText}>{guardandoProduccion ? '...' : '+ Agregar'}</Text>
           </TouchableOpacity>
         </View>
         {produccion.length > 0 && (
           <View style={s.listaRegistros}>
-            <Text style={s.totalText}>
-              Contador total: <Text style={s.totalAcento}>{totalContador.toLocaleString('es-CO')} uds</Text>
-            </Text>
+            <Text style={s.totalText}>Contador total: <Text style={s.totalAcento}>{totalContador.toLocaleString('es-CO')} uds</Text></Text>
             {produccion.map((r, i) => (
               <View key={i} style={s.registroFila}>
                 <Text style={s.registroHora}>{r.hora}</Text>
@@ -644,40 +687,53 @@ export default function Pantalla3() {
         )}
       </View>
 
-      {/* ── Paradas ── */}
+      {/* Paradas */}
       <View style={s.card}>
         <Text style={s.seccion}>PARADAS</Text>
-        <TouchableOpacity style={s.selector} onPress={() => setModalParadas(true)}>
-          <Text style={[s.selectorText, !paradaSeleccionada && s.placeholder]}>
-            {paradaSeleccionada ? `${paradaSeleccionada.codigo}. ${paradaSeleccionada.descripcion}` : 'Selecciona el tipo de parada'}
-          </Text>
-          <Text style={s.selectorChevron}>›</Text>
-        </TouchableOpacity>
-        <View style={s.fila}>
-          <TextInput
-            style={[s.input, { flex: 1 }]} value={minutosParada} onChangeText={setMinutosParada}
-            placeholder="Minutos de parada" placeholderTextColor="#555" keyboardType="numeric"
-          />
-          <TouchableOpacity
-            style={[s.btnAgregar, guardandoParada && s.btnDisabled]}
-            onPress={handleAgregarParada} disabled={guardandoParada}
-          >
-            <Text style={s.btnAgregarText}>{guardandoParada ? '...' : '+ Agregar'}</Text>
-          </TouchableOpacity>
-        </View>
+        {!paradaActiva ? (
+          <>
+            <TouchableOpacity style={s.selector} onPress={() => setModalParadas(true)}>
+              <Text style={[s.selectorText, !paradaSeleccionada && s.placeholder]}>
+                {paradaSeleccionada ? `${paradaSeleccionada.codigo}. ${paradaSeleccionada.descripcion}` : 'Selecciona el tipo de parada'}
+              </Text>
+              <Text style={s.selectorChevron}>›</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.btnIniciarParada, !paradaSeleccionada && s.btnDisabled]}
+              onPress={handleIniciarParada} disabled={!paradaSeleccionada}>
+              <Text style={s.btnIniciarParadaText}>▶ Iniciar parada</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={s.paradaActivaCard}>
+            <View style={s.paradaActivaHeader}>
+              <View style={s.paradaActivaDot} />
+              <Text style={s.paradaActivaCausa} numberOfLines={2}>
+                {paradaCausaActiva.current?.codigo}. {paradaCausaActiva.current?.descripcion}
+              </Text>
+            </View>
+            <Text style={s.paradaCronometroGrande}>{formatearTiempo(paradaSegundos)}</Text>
+            <Text style={s.paradaCronometroSub}>tiempo transcurrido</Text>
+            <TouchableOpacity style={[s.btnFinalizarParada, guardandoParada && s.btnDisabled]}
+              onPress={handleFinalizarParada} disabled={guardandoParada}>
+              <Text style={s.btnFinalizarParadaText}>
+                {guardandoParada ? 'Guardando...' : `■ Finalizar parada (${Math.max(1, Math.round(paradaSegundos / 60))} min)`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {paradasRegistradas.length > 0 && (
-          <View style={s.listaRegistros}>
+          <View style={[s.listaRegistros, { marginTop: 10 }]}>
             {paradasRegistradas.map((p, i) => (
               <View key={i} style={s.registroFila}>
                 <Text style={[s.registroHora, { flex: 1 }]}>{p.cod}. {p.descripcion}</Text>
-                <Text style={[s.registroCantidad, { color: p.programada ? '#888' : '#f87171' }]}>{p.minutos} min</Text>
+                <Text style={[s.registroCantidad, { color: p.programada ? '#6b8aa0' : '#f87171' }]}>{p.minutos} min</Text>
               </View>
             ))}
           </View>
         )}
       </View>
 
-      {/* ── Desperdicios ── */}
+      {/* Desperdicios */}
       <View style={s.card}>
         <Text style={s.seccion}>DESPERDICIOS</Text>
         <TouchableOpacity style={s.selector} onPress={() => setModalDesperdicios(true)}>
@@ -687,22 +743,16 @@ export default function Pantalla3() {
           <Text style={s.selectorChevron}>›</Text>
         </TouchableOpacity>
         <View style={s.fila}>
-          <TextInput
-            style={[s.input, { flex: 1 }]} value={cantidadDesperd} onChangeText={setCantidadDesperd}
-            placeholder="Unidades rechazadas" placeholderTextColor="#555" keyboardType="numeric"
-          />
-          <TouchableOpacity
-            style={[s.btnAgregar, guardandoDesperd && s.btnDisabled]}
-            onPress={handleAgregarDesperdicio} disabled={guardandoDesperd}
-          >
+          <TextInput style={[s.input, { flex: 1 }]} value={cantidadDesperd} onChangeText={setCantidadDesperd}
+            placeholder="Unidades rechazadas" placeholderTextColor="#3d5568" keyboardType="numeric" />
+          <TouchableOpacity style={[s.btnAgregar, guardandoDesperd && s.btnDisabled]}
+            onPress={handleAgregarDesperdicio} disabled={guardandoDesperd}>
             <Text style={s.btnAgregarText}>{guardandoDesperd ? '...' : '+ Agregar'}</Text>
           </TouchableOpacity>
         </View>
         {desperdRegistrados.length > 0 && (
           <View style={s.listaRegistros}>
-            <Text style={s.totalText}>
-              Rechazos: <Text style={s.totalRechazo}>{totalDesperdicios.toLocaleString('es-CO')} uds</Text>
-            </Text>
+            <Text style={s.totalText}>Rechazos: <Text style={s.totalRechazo}>{totalDesperdicios.toLocaleString('es-CO')} uds</Text></Text>
             {desperdRegistrados.map((d, i) => (
               <View key={i} style={s.registroFila}>
                 <Text style={[s.registroHora, { flex: 1 }]}>{d.cod}. {d.defecto}</Text>
@@ -713,7 +763,7 @@ export default function Pantalla3() {
         )}
       </View>
 
-      {/* ── Relevos ── */}
+      {/* Relevos */}
       <View style={s.card}>
         <View style={s.relevoSeccionRow}>
           <Text style={s.seccion}>RELEVO</Text>
@@ -727,24 +777,18 @@ export default function Pantalla3() {
           style={[s.input, relevoActivo && s.inputDeshabilitado]}
           value={cedulaRelevo}
           onChangeText={async v => {
-            setCedulaRelevo(v);
-            setNombreRelevo('');
-            // FIX E17: buscar empleado en tiempo real para validar que no sea él mismo
+            setCedulaRelevo(v); setNombreRelevo('');
             if (v.length >= 5) {
               try { const r = await apiValidarEmpleado(v); setNombreRelevo(r.nombre); }
               catch { setNombreRelevo('Empleado no encontrado'); }
             }
           }}
-          placeholder="Ingresa la cédula"
-          placeholderTextColor={relevoActivo ? '#3a3a3a' : '#555'}
-          keyboardType="numeric"
-          editable={!relevoActivo}
+          placeholder="Ingresa la cédula" placeholderTextColor={relevoActivo ? '#1e2d3d' : '#3d5568'}
+          keyboardType="numeric" editable={!relevoActivo}
         />
         <Text style={s.label}>Nombre del empleado en relevo</Text>
         <View style={s.inputAuto}>
-          <Text style={[s.inputAutoText, !nombreRelevo && s.placeholder]}>
-            {nombreRelevo || 'Se completa automáticamente'}
-          </Text>
+          <Text style={[s.inputAutoText, !nombreRelevo && s.placeholder]}>{nombreRelevo || 'Se completa automáticamente'}</Text>
         </View>
         {relevoActivo && (
           <View style={s.relevoActivoBadge}>
@@ -773,64 +817,65 @@ export default function Pantalla3() {
         )}
       </View>
 
-      {/* ── Botones finales ── */}
+      {/* ── Botones finales — 3 botones ─────────────────────────────────────── */}
       <View style={s.botonesFinales}>
+        {/* Fin de turno → va a pantalla 2 (nuevo turno misma orden) */}
         <TouchableOpacity style={s.btnTurno} onPress={handleFinTurno}>
-          <Text style={s.btnFinText}>↩ Fin de turno</Text>
+          <Text style={s.btnFinTexto}>↩ Fin de{'\n'}turno</Text>
         </TouchableOpacity>
+
+        {/* Pausar orden → cierra turno y va a pantalla 1 */}
+        <TouchableOpacity style={s.btnPausar} onPress={handlePausarOrden}>
+          <Text style={s.btnFinTexto}>⏸ Pausar{'\n'}orden</Text>
+        </TouchableOpacity>
+
+        {/* Fin de orden → solo habilitado cuando se cumple la meta */}
         <TouchableOpacity
           style={[s.btnOrden, !ordenCompleta && s.btnOrdenBloqueado]}
-          onPress={handleFinOrden} disabled={!ordenCompleta} activeOpacity={ordenCompleta ? 0.8 : 1}
+          onPress={handleFinOrden}
+          disabled={!ordenCompleta}
+          activeOpacity={ordenCompleta ? 0.8 : 1}
         >
-          <Text style={[s.btnFinText, !ordenCompleta && s.btnFinTextBloqueado]}>
-            {ordenCompleta ? '✓ Fin de orden' : `🔒 ${progresoPct}% completado`}
+          <Text style={[s.btnFinTexto, !ordenCompleta && s.btnFinTextoBloqueado]}>
+            {ordenCompleta ? '✓ Fin de\norden' : `🔒 ${progresoPct}%\ncompletado`}
           </Text>
         </TouchableOpacity>
       </View>
 
       {!ordenCompleta && (
         <Text style={s.notaBloqueado}>
-          El botón "Fin de orden" se habilitará cuando se alcancen {meta.toLocaleString('es-CO')} uds reales producidas
+          "Fin de orden" se habilita cuando se alcancen {meta.toLocaleString('es-CO')} uds reales
         </Text>
       )}
 
-      {/* ── Modal Paradas ── */}
+      {/* Modal Paradas */}
       <Modal visible={modalParadas} animationType="slide">
         <View style={s.modal}>
           <Text style={s.modalTitulo}>Selecciona la parada</Text>
-          <FlatList
-            data={paradas} keyExtractor={item => item.id.toString()}
+          <FlatList data={paradas} keyExtractor={item => item.id.toString()}
             renderItem={({ item }) => (
               <TouchableOpacity style={s.modalItem} onPress={() => { setParadaSeleccionada(item); setModalParadas(false); }}>
                 <Text style={s.modalItemCod}>{item.codigo}.</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.modalItemText}>{item.descripcion}</Text>
-                  <Text style={{ fontSize: 11, color: item.programada ? '#888' : '#f87171', marginTop: 2 }}>
-                    {item.programada ? 'Programada' : 'No programada'}
-                  </Text>
-                </View>
+                <View style={{ flex: 1 }}><Text style={s.modalItemText}>{item.descripcion}</Text></View>
               </TouchableOpacity>
-            )}
-          />
+            )} />
           <TouchableOpacity style={s.btnCerrar} onPress={() => setModalParadas(false)}>
             <Text style={s.btnCerrarText}>Cancelar</Text>
           </TouchableOpacity>
         </View>
       </Modal>
 
-      {/* ── Modal Desperdicios ── */}
+      {/* Modal Desperdicios */}
       <Modal visible={modalDesperdicios} animationType="slide">
         <View style={s.modal}>
           <Text style={s.modalTitulo}>Selecciona el defecto</Text>
-          <FlatList
-            data={desperdicios} keyExtractor={item => item.id.toString()}
+          <FlatList data={desperdicios} keyExtractor={item => item.id.toString()}
             renderItem={({ item }) => (
               <TouchableOpacity style={s.modalItem} onPress={() => { setDesperdSeleccionado(item); setModalDesperdicios(false); }}>
                 <Text style={s.modalItemCod}>{item.codigo}.</Text>
                 <Text style={s.modalItemText}>{item.descripcion}</Text>
               </TouchableOpacity>
-            )}
-          />
+            )} />
           <TouchableOpacity style={s.btnCerrar} onPress={() => setModalDesperdicios(false)}>
             <Text style={s.btnCerrarText}>Cancelar</Text>
           </TouchableOpacity>
@@ -842,86 +887,109 @@ export default function Pantalla3() {
 }
 
 const s = StyleSheet.create({
-  bannerSinConexion:    { backgroundColor: '#7f1d1d', borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#E24B4A' },
-  bannerTexto:          { color: '#fca5a5', fontSize: 12, fontWeight: '600', textAlign: 'center' },
-  loadingContainer:     { flex: 1, backgroundColor: '#181818', justifyContent: 'center', alignItems: 'center' },
-  loadingText:          { color: '#888', marginTop: 16, fontSize: 14 },
-  container:            { flex: 1, backgroundColor: '#181818' },
-  content:              { padding: 20, paddingTop: 48, paddingBottom: 48 },
-  metaCard:             { backgroundColor: '#222', borderRadius: 14, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#2e2e2e' },
-  metaRow:              { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
-  metaLogoWrap:         { width: 40 },
-  metaLogo:             { width: 40, height: 40 },
-  metaLabel:            { fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.8 },
-  metaValor:            { fontSize: 26, fontWeight: '800', color: '#f0f0f0', marginTop: 2 },
-  metaCirculo:          { width: 50, height: 50, borderRadius: 25, backgroundColor: '#2a2a2a', borderWidth: 2, borderColor: '#5A9E2F', justifyContent: 'center', alignItems: 'center' },
-  metaCirculoOk:        { borderColor: '#22c55e', backgroundColor: '#14532d' },
-  metaPct:              { fontSize: 13, fontWeight: '800', color: '#5A9E2F' },
-  metaPctOk:            { color: '#4ade80' },
-  barraFondo:           { height: 5, backgroundColor: '#2a2a2a', borderRadius: 3, marginBottom: 10 },
-  barraRelleno:         { height: 5, backgroundColor: '#5A9E2F', borderRadius: 3 },
-  barraRellenoOk:       { backgroundColor: '#22c55e' },
-  metaInfo:             { fontSize: 12, color: '#888', marginBottom: 2 },
-  metaInfoSub:          { fontSize: 11, color: '#666' },
-  metaInfoAcento:       { color: '#7ec44f', fontWeight: '600' },
-  metaInfoOk:           { color: '#4ade80', fontWeight: '700' },
-  metaInfoPendiente:    { color: '#f59e0b', fontWeight: '600' },
-  card:                 { backgroundColor: '#222', borderRadius: 12, borderWidth: 1, borderColor: '#2e2e2e', padding: 16, marginBottom: 14 },
-  seccion:              { fontSize: 11, fontWeight: '700', color: '#5A9E2F', letterSpacing: 1.2, marginBottom: 14 },
-  label:                { fontSize: 13, color: '#888', marginBottom: 6 },
-  input:                { backgroundColor: '#2a2a2a', borderRadius: 10, padding: 14, fontSize: 15, color: '#f0f0f0', borderWidth: 1, borderColor: '#383838' },
-  inputAuto:            { backgroundColor: '#1e2a16', borderRadius: 10, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#2d3f20' },
-  inputAutoText:        { fontSize: 15, color: '#7ec44f' },
-  placeholder:          { color: '#3a4a30' },
-  fila:                 { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  btnAgregar:           { backgroundColor: '#5A9E2F', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center', minWidth: 90, alignItems: 'center' },
-  btnAgregarText:       { color: '#fff', fontWeight: '700', fontSize: 13 },
-  btnDisabled:          { opacity: 0.3 },
-  listaRegistros:       { backgroundColor: '#2a2a2a', borderRadius: 10, padding: 12, marginTop: 4, borderWidth: 1, borderColor: '#383838' },
-  totalText:            { fontSize: 12, color: '#888', fontWeight: '600', marginBottom: 8 },
-  totalAcento:          { color: '#7ec44f' },
-  totalRechazo:         { color: '#f87171' },
-  registroFila:         { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#383838' },
-  registroHora:         { fontSize: 12, color: '#888' },
-  registroCantidad:     { fontSize: 12, color: '#f0f0f0', fontWeight: '600' },
-  selector:             { backgroundColor: '#2a2a2a', borderRadius: 10, padding: 15, marginBottom: 10, borderWidth: 1, borderColor: '#383838', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  selectorText:         { fontSize: 14, color: '#f0f0f0', flex: 1 },
-  selectorChevron:      { fontSize: 22, color: '#5A9E2F', marginLeft: 8 },
-  relevoSeccionRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  relevoEstadoBadge:    { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: '#1a2e10', borderWidth: 1, borderColor: '#2d4a1a' },
-  relevoEstadoLibre:    { backgroundColor: '#2a2a2a', borderColor: '#383838' },
-  relevoEstadoTextoActivo: { fontSize: 10, fontWeight: '700', color: '#7ec44f', letterSpacing: 0.8 },
-  relevoEstadoTextoLibre:  { fontSize: 10, fontWeight: '700', color: '#555', letterSpacing: 0.8 },
-  inputDeshabilitado:   { backgroundColor: '#1e1e1e', borderColor: '#282828', color: '#555', opacity: 0.6 },
-  relevoActivoBadge:    { backgroundColor: '#1e2a16', borderRadius: 8, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#2d3f20' },
-  relevoActivoText:     { fontSize: 13, color: '#7ec44f', fontWeight: '600' },
-  relevoActivoSub:      { fontSize: 11, color: '#5a7a4a', marginTop: 3 },
-  btnRelevo:            { flex: 1, backgroundColor: '#1e3320', borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#2d4a2a' },
-  btnRelevoFin:         { flex: 1, backgroundColor: '#3b1010', borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#5a1a1a' },
-  btnRelevoText:        { color: '#fff', fontWeight: '700', fontSize: 13 },
-  botonesFinales:       { flexDirection: 'row', gap: 12, marginTop: 8 },
-  btnTurno:             { flex: 1, backgroundColor: '#1e3320', borderRadius: 12, padding: 18, alignItems: 'center', borderWidth: 1, borderColor: '#2d4a2a' },
-  btnOrden:             { flex: 1, backgroundColor: '#7f1d1d', borderRadius: 12, padding: 18, alignItems: 'center' },
-  btnOrdenBloqueado:    { backgroundColor: '#2a2a2a', borderWidth: 1, borderColor: '#383838' },
-  btnFinText:           { color: '#fff', fontWeight: '700', fontSize: 14 },
-  btnFinTextBloqueado:  { color: '#555', fontSize: 13 },
-  notaBloqueado:        { fontSize: 11, color: '#555', textAlign: 'center', marginTop: 10, marginBottom: 4, paddingHorizontal: 8 },
-  modal:                { flex: 1, backgroundColor: '#181818', padding: 20, paddingTop: 60 },
-  modalTitulo:          { fontSize: 18, fontWeight: '700', color: '#f0f0f0', marginBottom: 16 },
-  modalItem:            { flexDirection: 'row', gap: 10, padding: 14, borderBottomWidth: 1, borderBottomColor: '#222', alignItems: 'flex-start' },
-  modalItemCod:         { fontSize: 14, color: '#5A9E2F', fontWeight: '700', minWidth: 28 },
-  modalItemText:        { fontSize: 14, color: '#d0d0d0', flex: 1 },
-  btnCerrar:            { backgroundColor: '#222', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 16, borderWidth: 1, borderColor: '#383838' },
-  btnCerrarText:        { color: '#888', fontWeight: '600', fontSize: 15 },
-  conexionRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  conexionIndicador:    { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  conexionDot:          { width: 8, height: 8, borderRadius: 4 },
-  conexionDotOk:        { backgroundColor: '#5A9E2F' },
-  conexionDotFail:      { backgroundColor: '#e24b4a' },
-  conexionTexto:        { fontSize: 12, fontWeight: '600' },
-  conexionTextoOk:      { color: '#5A9E2F' },
-  conexionTextoFail:    { color: '#e24b4a' },
-  btnSync:              { backgroundColor: '#2a2a2a', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#383838' },
-  btnSyncActivo:        { borderColor: '#5A9E2F', backgroundColor: '#1e2a16' },
-  btnSyncTexto:         { fontSize: 12, color: '#888', fontWeight: '600' },
+  bannerSinConexion:        { backgroundColor: '#3b0f0f', borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#E24B4A' },
+  bannerTexto:              { color: '#fca5a5', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  bannerParadaActiva:       { backgroundColor: '#3b1010', borderRadius: 8, padding: 12, marginBottom: 10, borderWidth: 1.5, borderColor: '#e24b4a', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  bannerParadaTexto:        { color: '#fca5a5', fontSize: 12, fontWeight: '700', flex: 1 },
+  bannerParadaCronometro:   { color: '#f87171', fontSize: 18, fontWeight: '800' },
+  loadingContainer:         { flex: 1, backgroundColor: '#0F1923', justifyContent: 'center', alignItems: 'center' },
+  loadingText:              { color: '#6b8aa0', marginTop: 16, fontSize: 14 },
+  container:                { flex: 1, backgroundColor: '#0F1923' },
+  content:                  { padding: 20, paddingTop: 48, paddingBottom: 48 },
+  metaCard:                 { backgroundColor: '#162029', borderRadius: 14, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#243040' },
+  metaRow:                  { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  metaLogoWrap:             { width: 48 },
+  metaLabel:                { fontSize: 11, color: '#6b8aa0', textTransform: 'uppercase', letterSpacing: 0.8 },
+  metaValor:                { fontSize: 26, fontWeight: '800', color: '#F5F5F5', marginTop: 2 },
+  metaCirculo:              { width: 50, height: 50, borderRadius: 25, backgroundColor: '#1e2d3d', borderWidth: 2, borderColor: '#00C896', justifyContent: 'center', alignItems: 'center' },
+  metaCirculoOk:            { borderColor: '#00C896', backgroundColor: '#003d2e' },
+  metaPct:                  { fontSize: 13, fontWeight: '800', color: '#00C896' },
+  metaPctOk:                { color: '#00C896' },
+  barraFondo:               { height: 5, backgroundColor: '#1e2d3d', borderRadius: 3, marginBottom: 10 },
+  barraRelleno:             { height: 5, backgroundColor: '#00C896', borderRadius: 3 },
+  barraRellenoOk:           { backgroundColor: '#00C896' },
+  metaInfo:                 { fontSize: 12, color: '#6b8aa0', marginBottom: 2 },
+  metaInfoSub:              { fontSize: 11, color: '#3d5568' },
+  metaInfoAcento:           { color: '#00C896', fontWeight: '600' },
+  metaInfoOk:               { color: '#00C896', fontWeight: '700' },
+  metaInfoPendiente:        { color: '#FF6B35', fontWeight: '600' },
+  card:                     { backgroundColor: '#162029', borderRadius: 12, borderWidth: 1, borderColor: '#243040', padding: 16, marginBottom: 14 },
+  seccion:                  { fontSize: 11, fontWeight: '700', color: '#00C896', letterSpacing: 1.2, marginBottom: 14 },
+  label:                    { fontSize: 13, color: '#6b8aa0', marginBottom: 6 },
+  input:                    { backgroundColor: '#1e2d3d', borderRadius: 10, padding: 14, fontSize: 15, color: '#F5F5F5', borderWidth: 1, borderColor: '#243040' },
+  inputError:               { borderColor: '#e24b4a', borderWidth: 1.5 },
+  textoError:               { color: '#f87171', fontSize: 11, marginTop: 4, marginLeft: 2 },
+  inputAuto:                { backgroundColor: '#003d2e', borderRadius: 10, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#00573d' },
+  inputAutoText:            { fontSize: 15, color: '#00C896' },
+  placeholder:              { color: '#1e4a3a' },
+  fila:                     { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  btnAgregar:               { backgroundColor: '#00C896', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center', minWidth: 90, alignItems: 'center' },
+  btnAgregarText:           { color: '#0F1923', fontWeight: '700', fontSize: 13 },
+  btnDisabled:              { opacity: 0.3 },
+  listaRegistros:           { backgroundColor: '#1e2d3d', borderRadius: 10, padding: 12, marginTop: 4, borderWidth: 1, borderColor: '#243040' },
+  totalText:                { fontSize: 12, color: '#6b8aa0', fontWeight: '600', marginBottom: 8 },
+  totalAcento:              { color: '#00C896' },
+  totalRechazo:             { color: '#f87171' },
+  registroFila:             { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#243040' },
+  registroHora:             { fontSize: 12, color: '#6b8aa0' },
+  registroCantidad:         { fontSize: 12, color: '#F5F5F5', fontWeight: '600' },
+  selector:                 { backgroundColor: '#1e2d3d', borderRadius: 10, padding: 15, marginBottom: 10, borderWidth: 1, borderColor: '#243040', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  selectorText:             { fontSize: 14, color: '#F5F5F5', flex: 1 },
+  selectorChevron:          { fontSize: 22, color: '#00C896', marginLeft: 8 },
+  btnIniciarParada:         { backgroundColor: '#7f1d1d', borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#991b1b', marginBottom: 4 },
+  btnIniciarParadaText:     { color: '#fff', fontWeight: '700', fontSize: 14 },
+  paradaActivaCard:         { backgroundColor: '#3b1010', borderRadius: 10, padding: 16, borderWidth: 1.5, borderColor: '#e24b4a', alignItems: 'center', marginBottom: 4 },
+  paradaActivaHeader:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, width: '100%' },
+  paradaActivaDot:          { width: 10, height: 10, borderRadius: 5, backgroundColor: '#e24b4a', flexShrink: 0 },
+  paradaActivaCausa:        { fontSize: 13, color: '#fca5a5', fontWeight: '600', flex: 1 },
+  paradaCronometroGrande:   { fontSize: 48, fontWeight: '800', color: '#f87171', letterSpacing: 2 },
+  paradaCronometroSub:      { fontSize: 11, color: '#9a4a4a', marginBottom: 16 },
+  btnFinalizarParada:       { backgroundColor: '#0F1923', borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#e24b4a', width: '100%' },
+  btnFinalizarParadaText:   { color: '#f87171', fontWeight: '700', fontSize: 13 },
+  relevoSeccionRow:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  relevoEstadoBadge:        { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: '#003d2e', borderWidth: 1, borderColor: '#00573d' },
+  relevoEstadoLibre:        { backgroundColor: '#1e2d3d', borderColor: '#243040' },
+  relevoEstadoTextoActivo:  { fontSize: 10, fontWeight: '700', color: '#00C896', letterSpacing: 0.8 },
+  relevoEstadoTextoLibre:   { fontSize: 10, fontWeight: '700', color: '#3d5568', letterSpacing: 0.8 },
+  inputDeshabilitado:       { backgroundColor: '#162029', borderColor: '#1e2d3d', color: '#3d5568', opacity: 0.6 },
+  relevoActivoBadge:        { backgroundColor: '#003d2e', borderRadius: 8, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#00573d' },
+  relevoActivoText:         { fontSize: 13, color: '#00C896', fontWeight: '600' },
+  relevoActivoSub:          { fontSize: 11, color: '#1e6b50', marginTop: 3 },
+  btnRelevo:                { flex: 1, backgroundColor: '#003d2e', borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#00573d' },
+  btnRelevoFin:             { flex: 1, backgroundColor: '#3b1010', borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#5a1a1a' },
+  btnRelevoText:            { color: '#fff', fontWeight: '700', fontSize: 13 },
+
+  // ── Botones finales ────────────────────────────────────────────────────────
+  botonesFinales:           { flexDirection: 'row', gap: 10, marginTop: 8 },
+  btnTurno:                 { flex: 1, backgroundColor: '#003d2e', borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#00573d' },
+  btnPausar:                { flex: 1, backgroundColor: '#1e2a3a', borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#FF6B35' },
+  btnOrden:                 { flex: 1, backgroundColor: '#7f1d1d', borderRadius: 12, padding: 16, alignItems: 'center' },
+  btnOrdenBloqueado:        { backgroundColor: '#1e2d3d', borderWidth: 1, borderColor: '#243040' },
+  btnFinTexto:              { color: '#fff', fontWeight: '700', fontSize: 13, textAlign: 'center' },
+  btnFinTextoBloqueado:     { color: '#3d5568', fontSize: 12, textAlign: 'center' },
+  notaBloqueado:            { fontSize: 11, color: '#3d5568', textAlign: 'center', marginTop: 10, marginBottom: 4, paddingHorizontal: 8 },
+
+  modal:                    { flex: 1, backgroundColor: '#0F1923', padding: 20, paddingTop: 60 },
+  modalTitulo:              { fontSize: 18, fontWeight: '700', color: '#F5F5F5', marginBottom: 16 },
+  modalItem:                { flexDirection: 'row', gap: 10, padding: 14, borderBottomWidth: 1, borderBottomColor: '#162029', alignItems: 'flex-start' },
+  modalItemCod:             { fontSize: 14, color: '#00C896', fontWeight: '700', minWidth: 28 },
+  modalItemText:            { fontSize: 14, color: '#b8c8d8', flex: 1 },
+  btnCerrar:                { backgroundColor: '#162029', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 16, borderWidth: 1, borderColor: '#243040' },
+  btnCerrarText:            { color: '#6b8aa0', fontWeight: '600', fontSize: 15 },
+  conexionRow:              { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  conexionIndicador:        { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  conexionDot:              { width: 8, height: 8, borderRadius: 4 },
+  conexionDotOk:            { backgroundColor: '#00C896' },
+  conexionDotFail:          { backgroundColor: '#e24b4a' },
+  conexionTexto:            { fontSize: 12, fontWeight: '600' },
+  conexionTextoOk:          { color: '#00C896' },
+  conexionTextoFail:        { color: '#e24b4a' },
+  btnSync:                  { backgroundColor: '#1e2d3d', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#243040' },
+  btnSyncActivo:            { borderColor: '#00C896', backgroundColor: '#003d2e' },
+  btnSyncTexto:             { fontSize: 12, color: '#6b8aa0', fontWeight: '600' },
+  ritmoDashboard:           { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  ritmoTarjeta:             { flex: 1, borderRadius: 8, padding: 10, borderWidth: 1 },
+  ritmoLabel:               { fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
+  ritmoValor:               { fontSize: 18, fontWeight: '800', marginBottom: 1 },
+  ritmoSub:                 { fontSize: 9 },
 });
